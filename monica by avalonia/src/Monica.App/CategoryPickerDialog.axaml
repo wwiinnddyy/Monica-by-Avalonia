@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:Monica.App.ViewModels"
+             x:Class="Monica.App.CategoryPickerDialog"
+             x:DataType="vm:CategoryPickerViewModel"
+             mc:Ignorable="d"
+             d:DesignWidth="420"
+             d:DesignHeight="180">
+    <StackPanel Width="380" Spacing="10">
+        <TextBlock Text="{Binding L.MoveSelectedPasswordsDescription}" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        <ComboBox ItemsSource="{Binding CategoryOptions}"
+                  SelectedItem="{Binding SelectedCategory}"
+                  HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:PasswordCategoryChoice">
+                    <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+            </ComboBox.ItemTemplate>
+        </ComboBox>
+    </StackPanel>
+</UserControl>
