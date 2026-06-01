@@ -259,6 +259,12 @@ public interface ILocalizationService : INotifyPropertyChanged
     string ClearClipboardAfterDescription { get; }
     string RequirePasswordBeforeExport { get; }
     string RequirePasswordBeforeExportDescription { get; }
+    string ChangeMasterPassword { get; }
+    string ChangeMasterPasswordDescription { get; }
+    string CurrentMasterPassword { get; }
+    string NewMasterPassword { get; }
+    string ConfirmNewMasterPassword { get; }
+    string ChangeMasterPasswordAction { get; }
     string Desktop { get; }
     string DesktopSettingsDescription { get; }
     string MinimizeToTray { get; }
@@ -627,6 +633,12 @@ public sealed class LocalizationService : ILocalizationService
     public string ClearClipboardAfterDescription => Text();
     public string RequirePasswordBeforeExport => Text();
     public string RequirePasswordBeforeExportDescription => Text();
+    public string ChangeMasterPassword => Text();
+    public string ChangeMasterPasswordDescription => Text();
+    public string CurrentMasterPassword => Text();
+    public string NewMasterPassword => Text();
+    public string ConfirmNewMasterPassword => Text();
+    public string ChangeMasterPasswordAction => Text();
     public string Desktop => Text();
     public string DesktopSettingsDescription => Text();
     public string MinimizeToTray => Text();
@@ -1033,6 +1045,17 @@ public sealed class LocalizationService : ILocalizationService
         ["ClearClipboardAfterDescription"] = "Set how long copied sensitive values remain on the clipboard.",
         ["RequirePasswordBeforeExport"] = "Require master password before export",
         ["RequirePasswordBeforeExportDescription"] = "Ask for the master password before preparing export data.",
+        ["ChangeMasterPassword"] = "Change master password",
+        ["ChangeMasterPasswordDescription"] = "Re-encrypt the local Avalonia vault with a new master password.",
+        ["CurrentMasterPassword"] = "Current master password",
+        ["NewMasterPassword"] = "New master password",
+        ["ConfirmNewMasterPassword"] = "Confirm new master password",
+        ["ChangeMasterPasswordAction"] = "Update master password",
+        ["EnterCurrentMasterPassword"] = "Enter the current master password.",
+        ["EnterNewMasterPassword"] = "Enter the new master password.",
+        ["ChangeMasterPasswordInProgress"] = "Updating master password and re-encrypting vault data...",
+        ["MasterPasswordChangedFormat"] = "Master password updated. Re-encrypted {0} database secret(s).",
+        ["ChangeMasterPasswordFailedFormat"] = "Master password update failed: {0}",
         ["SecurityRecovery"] = "Security questions",
         ["SecurityRecoveryDescription"] = "Configure two recovery questions that can later support master-password reset flows.",
         ["SecurityRecoveryEnabled"] = "Use security questions",
@@ -1473,6 +1496,17 @@ public sealed class LocalizationService : ILocalizationService
         ["ClearClipboardDescription"] = "复制密码或动态口令后，按超时时间清空剪贴板。",
         ["ClearClipboardAfter"] = "清空时间",
         ["RequirePasswordBeforeExport"] = "导出前要求主密码",
+        ["ChangeMasterPassword"] = "修改主密码",
+        ["ChangeMasterPasswordDescription"] = "使用新主密码重新加密本地 Avalonia 保险库。",
+        ["CurrentMasterPassword"] = "当前主密码",
+        ["NewMasterPassword"] = "新主密码",
+        ["ConfirmNewMasterPassword"] = "确认新主密码",
+        ["ChangeMasterPasswordAction"] = "更新主密码",
+        ["EnterCurrentMasterPassword"] = "请输入当前主密码。",
+        ["EnterNewMasterPassword"] = "请输入新主密码。",
+        ["ChangeMasterPasswordInProgress"] = "正在更新主密码并重新加密保险库数据...",
+        ["MasterPasswordChangedFormat"] = "主密码已更新，已重新加密 {0} 个数据库密文。",
+        ["ChangeMasterPasswordFailedFormat"] = "主密码更新失败：{0}",
         ["SecurityRecovery"] = "密保问题",
         ["SecurityRecoveryDescription"] = "配置两个找回问题，后续用于支持主密码重置流程。",
         ["SecurityRecoveryEnabled"] = "启用密保问题",

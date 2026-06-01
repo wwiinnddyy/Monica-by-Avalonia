@@ -5,6 +5,7 @@ using Monica.Core.Models;
 using Monica.Core.Services;
 using Monica.Data;
 using Monica.Data.Repositories;
+using Monica.Data.Services;
 using Monica.Platform.Services;
 
 namespace Monica.Tests;
@@ -289,10 +290,34 @@ public sealed class AppSettingsTests
         Assert.Equal(viewModel.L.Get("SecurityQuestionsSaved"), viewModel.StatusMessage);
     }
 
+    [Fact]
+    public async Task ViewModel_changes_master_password_through_settings_command()
+    {
+        var maintenance = new CapturingMasterPasswordMaintenanceService(
+            new MasterPasswordMaintenanceResult(true, "ok", PasswordsReencrypted: 2, PasswordHistoryEntriesReencrypted: 1, MdbxSecretsReencrypted: 1));
+        var viewModel = CreateViewModel(GetTempPath(), masterPasswordMaintenanceService: maintenance);
+        await viewModel.InitializeAsync();
+        viewModel.IsUnlocked = true;
+        viewModel.CurrentMasterPassword = "old password";
+        viewModel.NewMasterPassword = "new password";
+        viewModel.ConfirmNewMasterPassword = "new password";
+
+        await viewModel.ChangeMasterPasswordCommand.ExecuteAsync(null);
+
+        Assert.Equal("old password", maintenance.CurrentPassword);
+        Assert.Equal("new password", maintenance.NewPassword);
+        Assert.Equal("", viewModel.CurrentMasterPassword);
+        Assert.Equal("", viewModel.NewMasterPassword);
+        Assert.Equal("", viewModel.ConfirmNewMasterPassword);
+        Assert.Equal(viewModel.L.Format("MasterPasswordChangedFormat", 4), viewModel.StatusMessage);
+        Assert.False(viewModel.IsChangingMasterPassword);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         string settingsPath,
         IWebDavBackupService? webDavBackupService = null,
-        IPlatformIntegrationService? platformIntegrationService = null)
+        IPlatformIntegrationService? platformIntegrationService = null,
+        IMasterPasswordMaintenanceService? masterPasswordMaintenanceService = null)
     {
         var databasePath = Path.Combine(Path.GetTempPath(), "monica-tests", $"{Guid.NewGuid():N}.db");
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
@@ -317,7 +342,8 @@ public sealed class AppSettingsTests
             new NoopCategoryPickerDialogService(),
             new LegacyVaultDetector(factory),
             new AppSettingsService(settingsPath),
-            new LocalizationService());
+            new LocalizationService(),
+            masterPasswordMaintenanceService: masterPasswordMaintenanceService);
     }
 
     private static string GetTempPath()
@@ -372,6 +398,22 @@ public sealed class AppSettingsTests
             LastProfile = profile;
             DeletedPath = relativePath;
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingMasterPasswordMaintenanceService(MasterPasswordMaintenanceResult result) : IMasterPasswordMaintenanceService
+    {
+        public string CurrentPassword { get; private set; } = "";
+        public string NewPassword { get; private set; } = "";
+
+        public Task<MasterPasswordMaintenanceResult> ChangeMasterPasswordAsync(
+            string currentPassword,
+            string newPassword,
+            CancellationToken cancellationToken = default)
+        {
+            CurrentPassword = currentPassword;
+            NewPassword = newPassword;
+            return Task.FromResult(result);
         }
     }
 

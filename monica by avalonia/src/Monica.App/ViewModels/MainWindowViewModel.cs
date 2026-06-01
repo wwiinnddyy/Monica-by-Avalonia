@@ -13,6 +13,7 @@ using Monica.Core.Models;
 using Monica.Core.Services;
 using Monica.Data;
 using Monica.Data.Repositories;
+using Monica.Data.Services;
 using Monica.Platform.Services;
 
 namespace Monica.App.ViewModels;
@@ -108,6 +109,15 @@ internal sealed class DisabledWalletItemEditorDialogService : IWalletItemEditorD
         Task.FromResult<WalletItemEditorViewModel?>(null);
 }
 
+internal sealed class DisabledMasterPasswordMaintenanceService : IMasterPasswordMaintenanceService
+{
+    public Task<MasterPasswordMaintenanceResult> ChangeMasterPasswordAsync(
+        string currentPassword,
+        string newPassword,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(MasterPasswordMaintenanceResult.Failure("Master password maintenance is not available."));
+}
+
 public sealed partial class MainWindowViewModel : ObservableObject
 {
     private const int PasswordHistoryLimit = 10;
@@ -175,6 +185,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly ICategoryPickerDialogService _categoryPickerDialogService;
     private readonly ITotpEditorDialogService _totpEditorDialogService;
     private readonly IWalletItemEditorDialogService _walletItemEditorDialogService;
+    private readonly IMasterPasswordMaintenanceService _masterPasswordMaintenanceService;
     private readonly IVaultCredentialStore _credentialStore;
     private readonly ILegacyVaultDetector _legacyVaultDetector;
     private readonly IAppSettingsService _settingsService;
@@ -211,7 +222,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ILocalizationService localization,
         IPwnedPasswordService? pwnedPasswordService = null,
         ITotpEditorDialogService? totpEditorDialogService = null,
-        IWalletItemEditorDialogService? walletItemEditorDialogService = null)
+        IWalletItemEditorDialogService? walletItemEditorDialogService = null,
+        IMasterPasswordMaintenanceService? masterPasswordMaintenanceService = null)
     {
         _repository = repository;
         _credentialStore = credentialStore;
@@ -229,6 +241,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _categoryPickerDialogService = categoryPickerDialogService;
         _totpEditorDialogService = totpEditorDialogService ?? new DisabledTotpEditorDialogService();
         _walletItemEditorDialogService = walletItemEditorDialogService ?? new DisabledWalletItemEditorDialogService();
+        _masterPasswordMaintenanceService = masterPasswordMaintenanceService ?? new DisabledMasterPasswordMaintenanceService();
         _legacyVaultDetector = legacyVaultDetector ?? new NoLegacyVaultDetector();
         _settingsService = settingsService;
         _localization = localization;
@@ -296,6 +309,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public string ClearAllVaultDataText => _localization.Get("ClearAllVaultData");
     public string ClearVaultConfirmationInstructionText =>
         _localization.Format("ClearVaultConfirmationInstructionFormat", _localization.Get("ClearVaultConfirmationPhrase"));
+    public string ChangeMasterPasswordTitle => _localization.Get("ChangeMasterPassword");
+    public string ChangeMasterPasswordDescription => _localization.Get("ChangeMasterPasswordDescription");
+    public string CurrentMasterPasswordText => _localization.Get("CurrentMasterPassword");
+    public string NewMasterPasswordText => _localization.Get("NewMasterPassword");
+    public string ConfirmNewMasterPasswordText => _localization.Get("ConfirmNewMasterPassword");
+    public string ChangeMasterPasswordActionText => _localization.Get("ChangeMasterPasswordAction");
     public string SecurityRecoveryTitle => _localization.Get("SecurityRecovery");
     public string SecurityRecoveryDescription => _localization.Get("SecurityRecoveryDescription");
     public string SecurityRecoveryStatusText => _settingsService.Current.SecurityRecovery.HasCompleteSetup
@@ -318,6 +337,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private string _confirmMasterPassword = "";
+
+    [ObservableProperty]
+    private string _currentMasterPassword = "";
+
+    [ObservableProperty]
+    private string _newMasterPassword = "";
+
+    [ObservableProperty]
+    private string _confirmNewMasterPassword = "";
+
+    [ObservableProperty]
+    private bool _isChangingMasterPassword;
 
     [ObservableProperty]
     private string _searchText = "";
@@ -1102,6 +1133,72 @@ public sealed partial class MainWindowViewModel : ObservableObject
         DangerZoneConfirmationText = "";
         await LoadAsync();
         StatusMessage = _localization.Format("ClearedVaultDataFormat", LocalizeVaultClearScope(clearScope));
+    }
+
+    [RelayCommand]
+    private async Task ChangeMasterPasswordAsync()
+    {
+        if (!IsUnlocked)
+        {
+            StatusMessage = _localization.Get("VaultLocked");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(CurrentMasterPassword))
+        {
+            StatusMessage = _localization.Get("EnterCurrentMasterPassword");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(NewMasterPassword))
+        {
+            StatusMessage = _localization.Get("EnterNewMasterPassword");
+            return;
+        }
+
+        if (NewMasterPassword.Length < 8)
+        {
+            StatusMessage = _localization.Get("MasterPasswordMinLength");
+            return;
+        }
+
+        if (!string.Equals(NewMasterPassword, ConfirmNewMasterPassword, StringComparison.Ordinal))
+        {
+            StatusMessage = _localization.Get("ConfirmationMismatch");
+            return;
+        }
+
+        IsChangingMasterPassword = true;
+        StatusMessage = _localization.Get("ChangeMasterPasswordInProgress");
+        try
+        {
+            var result = await _masterPasswordMaintenanceService.ChangeMasterPasswordAsync(
+                CurrentMasterPassword,
+                NewMasterPassword);
+            if (!result.Success)
+            {
+                var message = result.Message.Contains("incorrect", StringComparison.OrdinalIgnoreCase)
+                    ? _localization.Get("WrongMasterPassword")
+                    : result.Message;
+                StatusMessage = _localization.Format("ChangeMasterPasswordFailedFormat", message);
+                return;
+            }
+
+            CurrentMasterPassword = "";
+            NewMasterPassword = "";
+            ConfirmNewMasterPassword = "";
+            MasterPassword = "";
+            ConfirmMasterPassword = "";
+            StatusMessage = _localization.Format("MasterPasswordChangedFormat", result.TotalSecretsReencrypted);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = _localization.Format("ChangeMasterPasswordFailedFormat", ex.Message);
+        }
+        finally
+        {
+            IsChangingMasterPassword = false;
+        }
     }
 
     [RelayCommand]
@@ -4670,6 +4767,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(PlatformIntegrationsTitle));
         RaisePlatformIntegrationState();
         RaiseSecurityRecoveryText();
+        RaiseMasterPasswordMaintenanceText();
         RaiseDangerZoneText();
         OnPropertyChanged(nameof(LoginTitle));
         OnPropertyChanged(nameof(LoginDescription));
@@ -4808,6 +4906,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ClearSecureItemsOnlyText));
         OnPropertyChanged(nameof(ClearAllVaultDataText));
         OnPropertyChanged(nameof(ClearVaultConfirmationInstructionText));
+    }
+
+    private void RaiseMasterPasswordMaintenanceText()
+    {
+        OnPropertyChanged(nameof(ChangeMasterPasswordTitle));
+        OnPropertyChanged(nameof(ChangeMasterPasswordDescription));
+        OnPropertyChanged(nameof(CurrentMasterPasswordText));
+        OnPropertyChanged(nameof(NewMasterPasswordText));
+        OnPropertyChanged(nameof(ConfirmNewMasterPasswordText));
+        OnPropertyChanged(nameof(ChangeMasterPasswordActionText));
     }
 
     private void RaiseSecurityRecoveryText()
