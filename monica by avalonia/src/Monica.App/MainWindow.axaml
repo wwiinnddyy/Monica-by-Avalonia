@@ -951,6 +951,59 @@
                                     </fa:FASettingsExpander.Items>
                                 </fa:FASettingsExpander>
 
+                                <fa:FASettingsExpander Header="{Binding SecurityRecoveryTitle}" Description="{Binding SecurityRecoveryDescription}" IsExpanded="False">
+                                    <fa:FASettingsExpander.IconSource>
+                                        <fa:FASymbolIconSource Symbol="ProtectedDocument" />
+                                    </fa:FASettingsExpander.IconSource>
+                                    <fa:FASettingsExpander.Items>
+                                        <fa:FASettingsExpanderItem Content="{Binding SecurityRecoveryEnabledText}" Description="{Binding SecurityRecoveryStatusText}">
+                                            <fa:FASettingsExpanderItem.Footer>
+                                                <ToggleSwitch IsChecked="{Binding SecurityRecoveryEnabled}" />
+                                            </fa:FASettingsExpanderItem.Footer>
+                                        </fa:FASettingsExpanderItem>
+
+                                        <fa:FASettingsExpanderItem Content="{Binding SecurityQuestion1Text}" Description="{Binding SecurityRecoveryDescription}">
+                                            <fa:FASettingsExpanderItem.Footer>
+                                                <StackPanel Spacing="8" Margin="16,0,0,0" MaxWidth="420">
+                                                    <ComboBox Width="360" ItemsSource="{Binding SecurityQuestionOptions}" SelectedValue="{Binding SecurityQuestion1Id}" SelectedValueBinding="{Binding Value}">
+                                                        <ComboBox.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:SettingsChoice">
+                                                                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                                                            </DataTemplate>
+                                                        </ComboBox.ItemTemplate>
+                                                    </ComboBox>
+                                                    <TextBox IsVisible="{Binding IsSecurityQuestion1Custom}" PlaceholderText="{Binding CustomSecurityQuestionText}" Text="{Binding SecurityQuestion1CustomText}" />
+                                                    <TextBox PasswordChar="*" PlaceholderText="{Binding SecurityQuestionAnswerText}" Text="{Binding SecurityQuestion1Answer}" />
+                                                </StackPanel>
+                                            </fa:FASettingsExpanderItem.Footer>
+                                        </fa:FASettingsExpanderItem>
+
+                                        <fa:FASettingsExpanderItem Content="{Binding SecurityQuestion2Text}" Description="{Binding SecurityRecoveryDescription}">
+                                            <fa:FASettingsExpanderItem.Footer>
+                                                <StackPanel Spacing="8" Margin="16,0,0,0" MaxWidth="420">
+                                                    <ComboBox Width="360" ItemsSource="{Binding SecurityQuestionOptions}" SelectedValue="{Binding SecurityQuestion2Id}" SelectedValueBinding="{Binding Value}">
+                                                        <ComboBox.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:SettingsChoice">
+                                                                <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                                                            </DataTemplate>
+                                                        </ComboBox.ItemTemplate>
+                                                    </ComboBox>
+                                                    <TextBox IsVisible="{Binding IsSecurityQuestion2Custom}" PlaceholderText="{Binding CustomSecurityQuestionText}" Text="{Binding SecurityQuestion2CustomText}" />
+                                                    <TextBox PasswordChar="*" PlaceholderText="{Binding SecurityQuestionAnswerText}" Text="{Binding SecurityQuestion2Answer}" />
+                                                </StackPanel>
+                                            </fa:FASettingsExpanderItem.Footer>
+                                        </fa:FASettingsExpanderItem>
+
+                                        <fa:FASettingsExpanderItem Content="{Binding SaveSecurityQuestionsText}" Description="{Binding SecurityRecoveryStatusText}">
+                                            <fa:FASettingsExpanderItem.Footer>
+                                                <Button Command="{Binding SaveSecurityQuestionsCommand}">
+                                                    <TextBlock Text="{Binding SaveSecurityQuestionsText}" />
+                                                </Button>
+                                            </fa:FASettingsExpanderItem.Footer>
+                                        </fa:FASettingsExpanderItem>
+                                    </fa:FASettingsExpander.Items>
+                                </fa:FASettingsExpander>
+
                                 <fa:FASettingsExpander Header="{Binding L.Desktop}" Description="{Binding L.DesktopSettingsDescription}" IsExpanded="True">
                                     <fa:FASettingsExpander.IconSource>
                                         <fa:FASymbolIconSource Symbol="ContactInfo" />

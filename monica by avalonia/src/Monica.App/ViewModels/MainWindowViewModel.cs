@@ -181,6 +181,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly ILocalizationService _localization;
     private readonly IReadOnlyList<PlatformCapability> _sourceCapabilities;
     private readonly IReadOnlyList<PlatformIntegrationCapability> _sourcePlatformIntegrationCapabilities;
+    private readonly SecurityQuestionService _securityQuestionService = new();
     private IReadOnlyDictionary<long, IReadOnlyList<CustomField>> _passwordCustomFields = new Dictionary<long, IReadOnlyList<CustomField>>();
     private IReadOnlyDictionary<long, IReadOnlyList<Attachment>> _passwordAttachments = new Dictionary<long, IReadOnlyList<Attachment>>();
     private IReadOnlyDictionary<long, PasswordQuickAccessRecord> _passwordQuickAccessRecords = new Dictionary<long, PasswordQuickAccessRecord>();
@@ -264,6 +265,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<SettingsChoice> ClipboardSecondOptions { get; } = [];
     public ObservableCollection<SettingsChoice> ConflictStrategyOptions { get; } = [];
     public ObservableCollection<SettingsChoice> PasswordSortOptions { get; } = [];
+    public ObservableCollection<SettingsChoice> SecurityQuestionOptions { get; } = [];
     public ObservableCollection<PasswordFolderFilterChoice> PasswordFolderFilters { get; } = [];
 
     [ObservableProperty]
@@ -294,6 +296,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public string ClearAllVaultDataText => _localization.Get("ClearAllVaultData");
     public string ClearVaultConfirmationInstructionText =>
         _localization.Format("ClearVaultConfirmationInstructionFormat", _localization.Get("ClearVaultConfirmationPhrase"));
+    public string SecurityRecoveryTitle => _localization.Get("SecurityRecovery");
+    public string SecurityRecoveryDescription => _localization.Get("SecurityRecoveryDescription");
+    public string SecurityRecoveryStatusText => _settingsService.Current.SecurityRecovery.HasCompleteSetup
+        ? _localization.Get("SecurityQuestionsConfigured")
+        : _localization.Get("SecurityQuestionsNotConfigured");
+    public string SecurityRecoveryEnabledText => _localization.Get("SecurityRecoveryEnabled");
+    public string SecurityQuestion1Text => _localization.Get("SecurityQuestion1");
+    public string SecurityQuestion2Text => _localization.Get("SecurityQuestion2");
+    public string SecurityQuestionAnswerText => _localization.Get("SecurityQuestionAnswer");
+    public string CustomSecurityQuestionText => _localization.Get("CustomSecurityQuestion");
+    public string SaveSecurityQuestionsText => _localization.Get("SaveSecurityQuestions");
+    public bool IsSecurityQuestion1Custom => SecurityQuestion1Id == SecurityQuestionService.CustomQuestionId;
+    public bool IsSecurityQuestion2Custom => SecurityQuestion2Id == SecurityQuestionService.CustomQuestionId;
 
     [ObservableProperty]
     private string _selectedSection = "Passwords";
@@ -405,6 +420,27 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _requirePasswordBeforeExport = true;
+
+    [ObservableProperty]
+    private bool _securityRecoveryEnabled;
+
+    [ObservableProperty]
+    private int _securityQuestion1Id = 11;
+
+    [ObservableProperty]
+    private string _securityQuestion1CustomText = "";
+
+    [ObservableProperty]
+    private string _securityQuestion1Answer = "";
+
+    [ObservableProperty]
+    private int _securityQuestion2Id = 1;
+
+    [ObservableProperty]
+    private string _securityQuestion2CustomText = "";
+
+    [ObservableProperty]
+    private string _securityQuestion2Answer = "";
 
     [ObservableProperty]
     private bool _minimizeToTray;
@@ -731,6 +767,32 @@ public sealed partial class MainWindowViewModel : ObservableObject
     partial void OnClearClipboardEnabledChanged(bool value) => UpdateSettings(settings => settings.ClearClipboardEnabled = value);
     partial void OnClipboardClearSecondsChanged(int value) => UpdateSettings(settings => settings.ClipboardClearSeconds = value);
     partial void OnRequirePasswordBeforeExportChanged(bool value) => UpdateSettings(settings => settings.RequirePasswordBeforeExport = value);
+    partial void OnSecurityRecoveryEnabledChanged(bool value)
+    {
+        UpdateSettings(settings => settings.SecurityRecovery.IsEnabled = value);
+        OnPropertyChanged(nameof(SecurityRecoveryStatusText));
+    }
+
+    partial void OnSecurityQuestion1IdChanged(int value)
+    {
+        if (!IsSecurityQuestion1Custom)
+        {
+            SecurityQuestion1CustomText = "";
+        }
+
+        OnPropertyChanged(nameof(IsSecurityQuestion1Custom));
+    }
+
+    partial void OnSecurityQuestion2IdChanged(int value)
+    {
+        if (!IsSecurityQuestion2Custom)
+        {
+            SecurityQuestion2CustomText = "";
+        }
+
+        OnPropertyChanged(nameof(IsSecurityQuestion2Custom));
+    }
+
     partial void OnMinimizeToTrayChanged(bool value)
     {
         if (value && !CanUseTrayIntegration)
@@ -1040,6 +1102,37 @@ public sealed partial class MainWindowViewModel : ObservableObject
         DangerZoneConfirmationText = "";
         await LoadAsync();
         StatusMessage = _localization.Format("ClearedVaultDataFormat", LocalizeVaultClearScope(clearScope));
+    }
+
+    [RelayCommand]
+    private void SaveSecurityQuestions()
+    {
+        if (!SecurityRecoveryEnabled)
+        {
+            _settingsService.Current.SecurityRecovery.IsEnabled = false;
+            QueueSaveSettings();
+            OnPropertyChanged(nameof(SecurityRecoveryStatusText));
+            StatusMessage = _localization.Get("SecurityQuestionsDisabled");
+            return;
+        }
+
+        try
+        {
+            var setup = _securityQuestionService.CreateSetup(
+                new SecurityQuestionDraft(SecurityQuestion1Id, GetSecurityQuestionText(SecurityQuestion1Id, SecurityQuestion1CustomText), SecurityQuestion1Answer),
+                new SecurityQuestionDraft(SecurityQuestion2Id, GetSecurityQuestionText(SecurityQuestion2Id, SecurityQuestion2CustomText), SecurityQuestion2Answer));
+            _settingsService.Current.SecurityRecovery = setup;
+            ApplySecurityRecoverySettings(setup);
+            SecurityQuestion1Answer = "";
+            SecurityQuestion2Answer = "";
+            QueueSaveSettings();
+            OnPropertyChanged(nameof(SecurityRecoveryStatusText));
+            StatusMessage = _localization.Get("SecurityQuestionsSaved");
+        }
+        catch (ArgumentException ex)
+        {
+            StatusMessage = _localization.Format("SecurityQuestionsSaveFailedFormat", ex.Message);
+        }
     }
 
     [RelayCommand]
@@ -4475,6 +4568,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ClearClipboardEnabled = settings.ClearClipboardEnabled;
             ClipboardClearSeconds = settings.ClipboardClearSeconds;
             RequirePasswordBeforeExport = settings.RequirePasswordBeforeExport;
+            ApplySecurityRecoverySettings(settings.SecurityRecovery);
             MinimizeToTray = settings.MinimizeToTray && CanUseTrayIntegration;
             QuickSearchEnabled = settings.QuickSearchEnabled;
             QuickSearchHotkey = settings.QuickSearchHotkey;
@@ -4507,6 +4601,29 @@ public sealed partial class MainWindowViewModel : ObservableObject
         finally
         {
             _isApplyingSettings = false;
+        }
+    }
+
+    private void ApplySecurityRecoverySettings(SecurityRecoverySettings settings)
+    {
+        var wasApplyingSettings = _isApplyingSettings;
+        _isApplyingSettings = true;
+        try
+        {
+            SecurityRecoveryEnabled = settings.IsEnabled;
+            SecurityQuestion1Id = settings.Question1Id;
+            SecurityQuestion1CustomText = settings.Question1Id == SecurityQuestionService.CustomQuestionId ? settings.Question1Text : "";
+            SecurityQuestion1Answer = "";
+            SecurityQuestion2Id = settings.Question2Id;
+            SecurityQuestion2CustomText = settings.Question2Id == SecurityQuestionService.CustomQuestionId ? settings.Question2Text : "";
+            SecurityQuestion2Answer = "";
+            OnPropertyChanged(nameof(SecurityRecoveryStatusText));
+            OnPropertyChanged(nameof(IsSecurityQuestion1Custom));
+            OnPropertyChanged(nameof(IsSecurityQuestion2Custom));
+        }
+        finally
+        {
+            _isApplyingSettings = wasApplyingSettings;
         }
     }
 
@@ -4552,6 +4669,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedSectionTitle));
         OnPropertyChanged(nameof(PlatformIntegrationsTitle));
         RaisePlatformIntegrationState();
+        RaiseSecurityRecoveryText();
         RaiseDangerZoneText();
         OnPropertyChanged(nameof(LoginTitle));
         OnPropertyChanged(nameof(LoginDescription));
@@ -4632,6 +4750,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             new("created-desc", _localization.Get("SortCreated")),
             new("favorites-first", _localization.Get("SortFavorites")));
 
+        ReplaceOptions(
+            SecurityQuestionOptions,
+            _securityQuestionService.PredefinedQuestions
+                .Select(question => new SettingsChoice(question.Id, question.Text))
+                .ToArray());
+
         OnPropertyChanged(nameof(FilteredPasswords));
     }
 
@@ -4686,6 +4810,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ClearVaultConfirmationInstructionText));
     }
 
+    private void RaiseSecurityRecoveryText()
+    {
+        OnPropertyChanged(nameof(SecurityRecoveryTitle));
+        OnPropertyChanged(nameof(SecurityRecoveryDescription));
+        OnPropertyChanged(nameof(SecurityRecoveryStatusText));
+        OnPropertyChanged(nameof(SecurityRecoveryEnabledText));
+        OnPropertyChanged(nameof(SecurityQuestion1Text));
+        OnPropertyChanged(nameof(SecurityQuestion2Text));
+        OnPropertyChanged(nameof(SecurityQuestionAnswerText));
+        OnPropertyChanged(nameof(CustomSecurityQuestionText));
+        OnPropertyChanged(nameof(SaveSecurityQuestionsText));
+    }
+
     private void RefreshCapabilities()
     {
         Capabilities.Clear();
@@ -4736,6 +4873,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         VaultClearScope.SecureItems => _localization.Get("ClearSecureItemsOnly"),
         _ => _localization.Get("ClearAllVaultData")
     };
+
+    private string GetSecurityQuestionText(int questionId, string customText) =>
+        questionId == SecurityQuestionService.CustomQuestionId
+            ? customText.Trim()
+            : _securityQuestionService.GetQuestion(questionId).Text;
 
     private bool IsPlatformIntegrationUsable(string key) => GetPlatformIntegration(key).IsUsable;
 

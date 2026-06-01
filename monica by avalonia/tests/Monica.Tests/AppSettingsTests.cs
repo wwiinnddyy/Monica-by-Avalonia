@@ -255,6 +255,40 @@ public sealed class AppSettingsTests
         Assert.False(reloaded.Current.BrowserIntegrationEnabled);
     }
 
+    [Fact]
+    public async Task ViewModel_saves_security_questions_as_hashed_recovery_settings()
+    {
+        var settingsPath = GetTempPath();
+        var viewModel = CreateViewModel(settingsPath);
+        await viewModel.InitializeAsync();
+
+        viewModel.SecurityRecoveryEnabled = true;
+        viewModel.SecurityQuestion1Id = 11;
+        viewModel.SecurityQuestion1Answer = "  Tiga ";
+        viewModel.SecurityQuestion2Id = SecurityQuestionService.CustomQuestionId;
+        viewModel.SecurityQuestion2CustomText = "Favorite shell?";
+        viewModel.SecurityQuestion2Answer = "PowerShell";
+        viewModel.SaveSecurityQuestionsCommand.Execute(null);
+        await Task.Delay(250);
+
+        var reloaded = new AppSettingsService(settingsPath);
+        await reloaded.LoadAsync();
+        var recovery = reloaded.Current.SecurityRecovery;
+        var securityQuestions = new SecurityQuestionService();
+
+        Assert.True(recovery.HasCompleteSetup);
+        Assert.Equal(11, recovery.Question1Id);
+        Assert.Equal(SecurityQuestionService.CustomQuestionId, recovery.Question2Id);
+        Assert.Equal("Favorite shell?", recovery.Question2Text);
+        Assert.DoesNotContain("Tiga", recovery.Question1AnswerHash, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PowerShell", recovery.Question2AnswerHash, StringComparison.OrdinalIgnoreCase);
+        Assert.True(securityQuestions.VerifyAnswer("tiga", recovery.Question1AnswerHash, recovery.Question1AnswerSalt));
+        Assert.True(securityQuestions.VerifyAnswer("powershell", recovery.Question2AnswerHash, recovery.Question2AnswerSalt));
+        Assert.Equal("", viewModel.SecurityQuestion1Answer);
+        Assert.Equal("", viewModel.SecurityQuestion2Answer);
+        Assert.Equal(viewModel.L.Get("SecurityQuestionsSaved"), viewModel.StatusMessage);
+    }
+
     private static MainWindowViewModel CreateViewModel(
         string settingsPath,
         IWebDavBackupService? webDavBackupService = null,

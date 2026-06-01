@@ -156,6 +156,40 @@ public sealed class CoreServicesTests
     }
 
     [Fact]
+    public void Security_questions_hash_and_verify_normalized_answers()
+    {
+        var service = new SecurityQuestionService();
+
+        var setup = service.CreateSetup(
+            new SecurityQuestionDraft(11, "", "  Tiga "),
+            new SecurityQuestionDraft(SecurityQuestionService.CustomQuestionId, "Favorite shell?", "PowerShell"));
+
+        Assert.True(setup.HasCompleteSetup);
+        Assert.Equal(11, setup.Question1Id);
+        Assert.Equal(SecurityQuestionService.CustomQuestionId, setup.Question2Id);
+        Assert.NotEqual("Tiga", setup.Question1AnswerHash);
+        Assert.True(service.VerifyAnswer("tiga", setup.Question1AnswerHash, setup.Question1AnswerSalt));
+        Assert.True(service.VerifyAnswer(" powershell ", setup.Question2AnswerHash, setup.Question2AnswerSalt));
+        Assert.False(service.VerifyAnswer("cmd", setup.Question2AnswerHash, setup.Question2AnswerSalt));
+    }
+
+    [Fact]
+    public void Security_questions_reject_duplicate_or_incomplete_setup()
+    {
+        var service = new SecurityQuestionService();
+
+        Assert.Throws<ArgumentException>(() => service.CreateSetup(
+            new SecurityQuestionDraft(1, "", "one"),
+            new SecurityQuestionDraft(1, "", "two")));
+        Assert.Throws<ArgumentException>(() => service.CreateSetup(
+            new SecurityQuestionDraft(SecurityQuestionService.CustomQuestionId, "", "one"),
+            new SecurityQuestionDraft(2, "", "two")));
+        Assert.Contains(
+            service.PredefinedQuestions,
+            question => question.Id == SecurityQuestionService.CustomQuestionId && question.Text == "Custom question");
+    }
+
+    [Fact]
     public void Password_generator_produces_strong_passwords()
     {
         var service = new PasswordGeneratorService();

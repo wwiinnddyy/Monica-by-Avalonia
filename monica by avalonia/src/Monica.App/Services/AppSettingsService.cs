@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Monica.Core.Models;
+using Monica.Core.Services;
 
 namespace Monica.App.Services;
 
@@ -14,6 +15,7 @@ public sealed class DesktopAppSettings
     public bool ClearClipboardEnabled { get; set; } = true;
     public int ClipboardClearSeconds { get; set; } = 30;
     public bool RequirePasswordBeforeExport { get; set; } = true;
+    public SecurityRecoverySettings SecurityRecovery { get; set; } = new();
     public bool MinimizeToTray { get; set; }
     public bool QuickSearchEnabled { get; set; } = true;
     public string QuickSearchHotkey { get; set; } = "Ctrl+Shift+Space";
@@ -149,6 +151,8 @@ public sealed class AppSettingsService : IAppSettingsService
         settings.AutoLockMinutes = Clamp(settings.AutoLockMinutes, 1, 120);
         settings.ClipboardClearSeconds = Clamp(settings.ClipboardClearSeconds, 10, 600);
         settings.BrowserIntegrationPort = Clamp(settings.BrowserIntegrationPort, 1024, 65535);
+        settings.SecurityRecovery ??= new SecurityRecoverySettings();
+        NormalizeSecurityRecovery(settings.SecurityRecovery);
 
         if (string.IsNullOrWhiteSpace(settings.WebDavRemotePath))
         {
@@ -161,6 +165,36 @@ public sealed class AppSettingsService : IAppSettingsService
         }
 
         NormalizeFeatureToggles(settings);
+    }
+
+    private static void NormalizeSecurityRecovery(SecurityRecoverySettings settings)
+    {
+        var securityQuestions = new SecurityQuestionService();
+        var question1 = securityQuestions.GetQuestion(settings.Question1Id);
+        var question2 = securityQuestions.GetQuestion(settings.Question2Id);
+        settings.Question1Id = settings.Question1Id == SecurityQuestionService.CustomQuestionId
+            ? SecurityQuestionService.CustomQuestionId
+            : question1.Id;
+        settings.Question2Id = settings.Question2Id == SecurityQuestionService.CustomQuestionId
+            ? SecurityQuestionService.CustomQuestionId
+            : question2.Id;
+
+        if (string.IsNullOrWhiteSpace(settings.Question1Text) || settings.Question1Id != SecurityQuestionService.CustomQuestionId)
+        {
+            settings.Question1Text = question1.Text;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.Question2Text) || settings.Question2Id != SecurityQuestionService.CustomQuestionId)
+        {
+            settings.Question2Text = question2.Text;
+        }
+
+        if (settings.Question1Id == settings.Question2Id && settings.Question1Id != SecurityQuestionService.CustomQuestionId)
+        {
+            var fallback = securityQuestions.GetQuestion(1);
+            settings.Question2Id = fallback.Id == settings.Question1Id ? 2 : fallback.Id;
+            settings.Question2Text = securityQuestions.GetQuestion(settings.Question2Id).Text;
+        }
     }
 
     private static void NormalizeFeatureToggles(DesktopAppSettings settings)
@@ -188,4 +222,5 @@ public sealed class AppSettingsService : IAppSettingsService
 
 [JsonSerializable(typeof(DesktopAppSettings))]
 [JsonSerializable(typeof(Dictionary<string, bool>))]
+[JsonSerializable(typeof(SecurityRecoverySettings))]
 internal sealed partial class AppSettingsJsonContext : JsonSerializerContext;
