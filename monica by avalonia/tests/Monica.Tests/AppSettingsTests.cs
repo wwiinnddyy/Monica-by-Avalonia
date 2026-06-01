@@ -268,6 +268,41 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public async Task ViewModel_imports_aegis_json_from_file_picker()
+    {
+        var integration = new PlatformIntegrationService("TestOS",
+        [
+            PlatformIntegrationService.Available(PlatformFeatureKeys.FilePicker, "File picking works.")
+        ]);
+        var json = new ImportExportService().ExportAegisJson(
+        [
+            new SecureItem
+            {
+                ItemType = VaultItemType.Totp,
+                Title = "GitHub",
+                Notes = "work account",
+                ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "dev@example.com"))
+            }
+        ]);
+        var filePicker = new CapturingFileSystemPickerService(
+            integration,
+            new PickedTextFile("aegis.json", json));
+        var viewModel = CreateViewModel(
+            GetTempPath(),
+            platformIntegrationService: integration,
+            fileSystemPickerService: filePicker);
+
+        await viewModel.ImportAegisJsonFileCommand.ExecuteAsync(null);
+
+        var imported = Assert.Single(viewModel.TotpItems);
+        Assert.Equal("dev@example.com", imported.Title);
+        Assert.Equal("", viewModel.ImportAegisJsonText);
+        Assert.Equal(viewModel.L.Format("ImportedAegisJsonFormat", 1, 0), viewModel.StatusMessage);
+        Assert.Equal("Aegis JSON", Assert.Single(filePicker.OpenFileTypes).Name);
+        Assert.Equal("*.json", Assert.Single(Assert.Single(filePicker.OpenFileTypes).Patterns));
+    }
+
+    [Fact]
     public async Task ViewModel_saves_password_csv_export_through_file_picker()
     {
         var integration = new PlatformIntegrationService("TestOS",

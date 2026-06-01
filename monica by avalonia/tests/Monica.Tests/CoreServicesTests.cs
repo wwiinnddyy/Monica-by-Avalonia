@@ -183,6 +183,44 @@ public sealed class CoreServicesTests
     }
 
     [Fact]
+    public void Import_export_imports_unencrypted_aegis_json()
+    {
+        var service = new ImportExportService();
+        var json = service.ExportAegisJson(
+        [
+            new SecureItem
+            {
+                ItemType = VaultItemType.Totp,
+                Title = "GitHub",
+                Notes = "work account",
+                ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "dev@example.com"))
+            }
+        ]);
+
+        var imported = Assert.Single(service.ImportAegisJson(json));
+        var data = TotpDataResolver.ParseStoredItemData(imported.ItemData);
+
+        Assert.Equal(VaultItemType.Totp, imported.ItemType);
+        Assert.Equal("dev@example.com", imported.Title);
+        Assert.Equal("work account", imported.Notes);
+        Assert.NotNull(data);
+        Assert.Equal("JBSWY3DPEHPK3PXP", data.Secret);
+        Assert.Equal("GitHub", data.Issuer);
+        Assert.Equal("dev@example.com", data.AccountName);
+    }
+
+    [Fact]
+    public void Import_export_reports_encrypted_aegis_json_as_unsupported()
+    {
+        var service = new ImportExportService();
+        var json = """{"version":1,"header":{"slots":[]},"db":"encrypted-payload"}""";
+
+        var ex = Assert.Throws<NotSupportedException>(() => service.ImportAegisJson(json));
+
+        Assert.Contains("Encrypted Aegis JSON", ex.Message);
+    }
+
+    [Fact]
     public void Import_password_csv_accepts_bitwarden_style_headers()
     {
         var service = new ImportExportService();

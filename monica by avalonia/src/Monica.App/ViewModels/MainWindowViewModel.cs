@@ -425,6 +425,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _importJsonText = "";
 
     [ObservableProperty]
+    private string _importAegisJsonText = "";
+
+    [ObservableProperty]
     private string _exportCsvPreview = "";
 
     [ObservableProperty]
@@ -2669,6 +2672,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
+    private async Task ImportAegisJsonFileAsync()
+    {
+        try
+        {
+            var file = await _fileSystemPickerService.OpenTextFileAsync(_localization.Get("ImportAegisJson"), AegisJsonFileTypes);
+            if (file is null)
+            {
+                return;
+            }
+
+            ImportAegisJsonText = file.Content;
+            await ImportAegisJsonAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = _localization.Format("ImportFailedFormat", ex.Message);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
     private async Task SaveMonicaJsonExportAsync()
     {
         if (string.IsNullOrWhiteSpace(ExportPreview))
@@ -3141,6 +3164,54 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ImportCsvText = "";
             await LoadAsync();
             StatusMessage = _localization.Format("ImportedPasswordCsvFormat", importedPasswords);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = _localization.Format("ImportFailedFormat", ex.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ImportAegisJsonAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ImportAegisJsonText))
+        {
+            StatusMessage = _localization.Get("ImportAegisJsonRequired");
+            return;
+        }
+
+        try
+        {
+            var entries = _importExportService.ImportAegisJson(ImportAegisJsonText);
+            var existingTitles = (await _repository.GetSecureItemsAsync(VaultItemType.Totp))
+                .Select(item => item.Title)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var importedTotps = 0;
+            var skippedTotps = 0;
+
+            foreach (var source in entries)
+            {
+                if (!existingTitles.Add(source.Title))
+                {
+                    skippedTotps++;
+                    continue;
+                }
+
+                await _repository.SaveSecureItemAsync(source);
+                importedTotps++;
+            }
+
+            await _repository.LogAsync(new OperationLog
+            {
+                ItemType = "TOTP",
+                ItemTitle = _localization.Get("AegisJson"),
+                OperationType = "IMPORT",
+                DeviceName = Environment.MachineName
+            });
+
+            ImportAegisJsonText = "";
+            await LoadAsync();
+            StatusMessage = _localization.Format("ImportedAegisJsonFormat", importedTotps, skippedTotps);
         }
         catch (Exception ex)
         {
@@ -5189,6 +5260,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OpenGitHubRepositoryCommand.NotifyCanExecuteChanged();
         ImportMonicaJsonFileCommand.NotifyCanExecuteChanged();
         ImportPasswordCsvFileCommand.NotifyCanExecuteChanged();
+        ImportAegisJsonFileCommand.NotifyCanExecuteChanged();
         SaveMonicaJsonExportCommand.NotifyCanExecuteChanged();
         SavePasswordCsvExportCommand.NotifyCanExecuteChanged();
         SaveAegisJsonExportCommand.NotifyCanExecuteChanged();

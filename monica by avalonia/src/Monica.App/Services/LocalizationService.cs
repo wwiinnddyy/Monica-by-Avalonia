@@ -212,6 +212,9 @@ public interface ILocalizationService : INotifyPropertyChanged
     string ImportMonicaJson { get; }
     string ImportMonicaJsonDescription { get; }
     string ImportJsonWatermark { get; }
+    string ImportAegisJson { get; }
+    string ImportAegisJsonDescription { get; }
+    string ImportAegisJsonWatermark { get; }
     string ImportPasswordCsv { get; }
     string ImportPasswordCsvDescription { get; }
     string ImportCsvWatermark { get; }
@@ -598,6 +601,9 @@ public sealed class LocalizationService : ILocalizationService
     public string ImportMonicaJson => Text();
     public string ImportMonicaJsonDescription => Text();
     public string ImportJsonWatermark => Text();
+    public string ImportAegisJson => Text();
+    public string ImportAegisJsonDescription => Text();
+    public string ImportAegisJsonWatermark => Text();
     public string ImportPasswordCsv => Text();
     public string ImportPasswordCsvDescription => Text();
     public string ImportCsvWatermark => Text();
@@ -1024,6 +1030,9 @@ public sealed class LocalizationService : ILocalizationService
         ["ImportMonicaJson"] = "Import Monica JSON",
         ["ImportMonicaJsonDescription"] = "Paste a Monica JSON export package and import its passwords, notes, wallet items and authenticators into this vault.",
         ["ImportJsonWatermark"] = "Paste Monica JSON export here",
+        ["ImportAegisJson"] = "Import Aegis JSON",
+        ["ImportAegisJsonDescription"] = "Import unencrypted Aegis JSON authenticator exports into the TOTP vault. Encrypted Aegis files are reported as unsupported for now.",
+        ["ImportAegisJsonWatermark"] = "Paste unencrypted Aegis JSON here",
         ["ImportPasswordCsv"] = "Import Password CSV",
         ["ImportPasswordCsvDescription"] = "Paste a password CSV from Monica, Bitwarden-style exports or another manager. Passwords are encrypted before they are saved.",
         ["ImportCsvWatermark"] = "Paste password CSV here",
@@ -1396,6 +1405,8 @@ public sealed class LocalizationService : ILocalizationService
         ["ImportJsonRequired"] = "Paste Monica JSON before importing.",
         ["ImportedMonicaJsonFormat"] = "Imported {0} passwords and {1} secure items.",
         ["ImportedMonicaJsonWithCategoriesFormat"] = "Imported {0} passwords, {1} secure items and {2} folders.",
+        ["ImportAegisJsonRequired"] = "Paste Aegis JSON before importing.",
+        ["ImportedAegisJsonFormat"] = "Imported {0} authenticators from Aegis JSON. Skipped {1} duplicates.",
         ["ImportCsvRequired"] = "Paste password CSV before importing.",
         ["ImportedPasswordCsvFormat"] = "Imported {0} passwords from CSV.",
         ["ExportedPasswordCsv"] = "Prepared password CSV export preview",
@@ -1404,6 +1415,7 @@ public sealed class LocalizationService : ILocalizationService
         ["SaveExportFileFailedFormat"] = "Save export failed: {0}",
         ["ImportFailedFormat"] = "Import failed: {0}",
         ["MonicaJson"] = "Monica JSON",
+        ["AegisJson"] = "Aegis JSON",
         ["PasswordCsv"] = "Password CSV",
         ["CreatedMdbxMetadata"] = "Created MDBX metadata and local working file path"
     };
@@ -1530,6 +1542,9 @@ public sealed class LocalizationService : ILocalizationService
         ["ImportMonicaJson"] = "导入 Monica JSON",
         ["ImportMonicaJsonDescription"] = "选择或粘贴 Monica JSON 导出包，将密码、笔记、卡包和验证器导入此保险库。",
         ["ImportJsonWatermark"] = "在此粘贴 Monica JSON 导出内容",
+        ["ImportAegisJson"] = "导入 Aegis JSON",
+        ["ImportAegisJsonDescription"] = "将未加密的 Aegis JSON 验证器导出导入到 TOTP 保险库。加密 Aegis 文件目前会提示暂不支持。",
+        ["ImportAegisJsonWatermark"] = "在此粘贴未加密的 Aegis JSON",
         ["ImportPasswordCsv"] = "导入密码 CSV",
         ["ImportPasswordCsvDescription"] = "选择或粘贴 Monica、Bitwarden 风格或其他密码管理器的 CSV。保存前会加密密码。",
         ["ImportCsvWatermark"] = "在此粘贴密码 CSV",
@@ -1772,6 +1787,8 @@ public sealed class LocalizationService : ILocalizationService
         ["ImportJsonRequired"] = "请先粘贴 Monica JSON 再导入。",
         ["ImportedMonicaJsonFormat"] = "已导入 {0} 个密码和 {1} 个安全项目。",
         ["ImportedMonicaJsonWithCategoriesFormat"] = "已导入 {0} 个密码、{1} 个安全项目和 {2} 个文件夹。",
+        ["ImportAegisJsonRequired"] = "请先粘贴 Aegis JSON 再导入。",
+        ["ImportedAegisJsonFormat"] = "已从 Aegis JSON 导入 {0} 个验证器，跳过 {1} 个重复项。",
         ["ImportCsvRequired"] = "请先粘贴密码 CSV 再导入。",
         ["ImportedPasswordCsvFormat"] = "已从 CSV 导入 {0} 个密码。",
         ["ExportedPasswordCsv"] = "已准备密码 CSV 导出预览",
@@ -1780,6 +1797,7 @@ public sealed class LocalizationService : ILocalizationService
         ["SaveExportFileFailedFormat"] = "保存导出失败：{0}",
         ["ImportFailedFormat"] = "导入失败：{0}",
         ["MonicaJson"] = "Monica JSON",
+        ["AegisJson"] = "Aegis JSON",
         ["PasswordCsv"] = "密码 CSV",
         ["CreatedMdbxMetadata"] = "已创建 MDBX 元数据和本地工作文件路径"
     };
