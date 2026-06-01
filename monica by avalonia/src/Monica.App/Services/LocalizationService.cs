@@ -325,7 +325,10 @@ public interface ILocalizationService : INotifyPropertyChanged
     string Available { get; }
     string DesktopEquivalent { get; }
     string PlatformLimited { get; }
+    string Unsupported { get; }
     string Planned { get; }
+    string FeatureEnabled { get; }
+    string FeatureDisabled { get; }
     string OperationCreate { get; }
     string OperationUpdate { get; }
     string OperationDelete { get; }
@@ -690,7 +693,10 @@ public sealed class LocalizationService : ILocalizationService
     public string Available => Text();
     public string DesktopEquivalent => Text();
     public string PlatformLimited => Text();
+    public string Unsupported => Text();
     public string Planned => Text();
+    public string FeatureEnabled => Text();
+    public string FeatureDisabled => Text();
     public string OperationCreate => Text();
     public string OperationUpdate => Text();
     public string OperationDelete => Text();
@@ -1083,7 +1089,10 @@ public sealed class LocalizationService : ILocalizationService
         ["Available"] = "Available",
         ["DesktopEquivalent"] = "Desktop equivalent",
         ["PlatformLimited"] = "Platform limited",
+        ["Unsupported"] = "Unsupported",
         ["Planned"] = "Planned",
+        ["FeatureEnabled"] = "Enabled",
+        ["FeatureDisabled"] = "Disabled",
         ["Capability.passwords.Title"] = "Passwords",
         ["Capability.passwords.Description"] = "Login credentials with websites, app bindings, folders, favorites, archive, recycle bin and history.",
         ["Capability.notes.Title"] = "Secure Notes",
@@ -1437,7 +1446,10 @@ public sealed class LocalizationService : ILocalizationService
         ["Available"] = "可用",
         ["DesktopEquivalent"] = "桌面等价",
         ["PlatformLimited"] = "平台受限",
+        ["Unsupported"] = "不支持",
         ["Planned"] = "计划中",
+        ["FeatureEnabled"] = "已开启",
+        ["FeatureDisabled"] = "已关闭",
         ["Capability.passwords.Title"] = "密码",
         ["Capability.passwords.Description"] = "登录凭据，支持网站、应用绑定、文件夹、收藏、归档、回收站和历史记录。",
         ["Capability.notes.Title"] = "安全笔记",

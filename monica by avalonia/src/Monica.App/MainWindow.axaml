@@ -1003,7 +1003,14 @@
                                         <DataTemplate x:DataType="vm:LocalizedPlatformCapability">
                                             <fa:FASettingsExpanderItem Content="{Binding Title}" Description="{Binding Description}">
                                                 <fa:FASettingsExpanderItem.Footer>
-                                                    <TextBlock Text="{Binding Status}" Margin="16,0,0,0" VerticalAlignment="Center" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="12" Margin="16,0,0,0" VerticalAlignment="Center">
+                                                        <StackPanel MinWidth="132" Spacing="2">
+                                                            <TextBlock Text="{Binding Status}" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding ToggleStatus}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                            <TextBlock Text="{Binding UnsupportedReason}" FontSize="12" TextWrapping="Wrap" MaxWidth="280" Foreground="{DynamicResource TextFillColorSecondaryBrush}" IsVisible="{Binding HasUnsupportedReason}" />
+                                                        </StackPanel>
+                                                        <ToggleSwitch IsChecked="{Binding IsEnabled, Mode=TwoWay}" IsEnabled="{Binding CanToggle}" ToolTip.Tip="{Binding ToggleStatus}" />
+                                                    </StackPanel>
                                                 </fa:FASettingsExpanderItem.Footer>
                                             </fa:FASettingsExpanderItem>
                                         </DataTemplate>
@@ -1131,7 +1138,14 @@
                                         <DataTemplate x:DataType="vm:LocalizedPlatformCapability">
                                             <fa:FASettingsExpanderItem Content="{Binding Title}" Description="{Binding Description}">
                                                 <fa:FASettingsExpanderItem.Footer>
-                                                    <TextBlock Text="{Binding Status}" Margin="16,0,0,0" VerticalAlignment="Center" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="12" Margin="16,0,0,0" VerticalAlignment="Center">
+                                                        <StackPanel MinWidth="132" Spacing="2">
+                                                            <TextBlock Text="{Binding Status}" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding ToggleStatus}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                            <TextBlock Text="{Binding UnsupportedReason}" FontSize="12" TextWrapping="Wrap" MaxWidth="280" Foreground="{DynamicResource TextFillColorSecondaryBrush}" IsVisible="{Binding HasUnsupportedReason}" />
+                                                        </StackPanel>
+                                                        <ToggleSwitch IsChecked="{Binding IsEnabled, Mode=TwoWay}" IsEnabled="{Binding CanToggle}" ToolTip.Tip="{Binding ToggleStatus}" />
+                                                    </StackPanel>
                                                 </fa:FASettingsExpanderItem.Footer>
                                             </fa:FASettingsExpanderItem>
                                         </DataTemplate>

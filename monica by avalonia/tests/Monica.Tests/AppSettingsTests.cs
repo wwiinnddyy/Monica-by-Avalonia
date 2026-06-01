@@ -131,14 +131,26 @@ public sealed class AppSettingsTests
         Assert.Equal("创建 Monica 保险库", viewModel.LoginTitle);
         Assert.Contains(viewModel.Capabilities, capability => capability.Title == "密码" && capability.Status == "可用");
 
+        var passwordCapability = Assert.Single(viewModel.Capabilities, capability => capability.Key == "passwords");
+        Assert.True(passwordCapability.CanToggle);
+        Assert.True(passwordCapability.IsEnabled);
+        Assert.Equal(viewModel.L.FeatureEnabled, passwordCapability.ToggleStatus);
+        var autofillCapability = Assert.Single(viewModel.Capabilities, capability => capability.Key == "autofill");
+        Assert.False(autofillCapability.IsEnabled);
+        var credentialProviderCapability = Assert.Single(viewModel.Capabilities, capability => capability.Key == "credential-provider");
+        Assert.False(credentialProviderCapability.IsEnabled);
+        Assert.False(string.IsNullOrWhiteSpace(credentialProviderCapability.UnsupportedReason));
+
         viewModel.WebDavEnabled = true;
         viewModel.WebDavServerUrl = "https://dav.example.com";
+        passwordCapability.IsEnabled = false;
         await Task.Delay(250);
 
         var reloaded = new AppSettingsService(settingsPath);
         await reloaded.LoadAsync();
         Assert.True(reloaded.Current.WebDavEnabled);
         Assert.Equal("https://dav.example.com", reloaded.Current.WebDavServerUrl);
+        Assert.False(reloaded.IsFeatureEnabled("passwords"));
     }
 
     [Fact]

@@ -18,13 +18,62 @@ using Monica.Platform.Services;
 namespace Monica.App.ViewModels;
 
 public sealed record SettingsChoice(object Value, string Label);
-public sealed record LocalizedPlatformCapability(
-    string Key,
-    string Title,
-    string Description,
-    string Status,
-    bool IsEnabled,
-    string UnsupportedReason);
+public sealed class LocalizedPlatformCapability : ObservableObject
+{
+    private readonly Action<string, bool> _setFeatureEnabled;
+    private readonly string _enabledText;
+    private readonly string _disabledText;
+    private bool _isEnabled;
+
+    public LocalizedPlatformCapability(
+        string key,
+        string title,
+        string description,
+        string status,
+        bool isEnabled,
+        bool canToggle,
+        string enabledText,
+        string disabledText,
+        string unsupportedReason,
+        Action<string, bool> setFeatureEnabled)
+    {
+        Key = key;
+        Title = title;
+        Description = description;
+        Status = status;
+        CanToggle = canToggle;
+        UnsupportedReason = unsupportedReason;
+        _enabledText = enabledText;
+        _disabledText = disabledText;
+        _setFeatureEnabled = setFeatureEnabled;
+        _isEnabled = canToggle && isEnabled;
+    }
+
+    public string Key { get; }
+    public string Title { get; }
+    public string Description { get; }
+    public string Status { get; }
+    public bool CanToggle { get; }
+    public string UnsupportedReason { get; }
+    public bool HasUnsupportedReason => !string.IsNullOrWhiteSpace(UnsupportedReason);
+    public string ToggleStatus => IsEnabled ? _enabledText : _disabledText;
+
+    public bool IsEnabled
+    {
+        get => _isEnabled;
+        set
+        {
+            var normalizedValue = CanToggle && value;
+            if (!SetProperty(ref _isEnabled, normalizedValue))
+            {
+                return;
+            }
+
+            _setFeatureEnabled(Key, normalizedValue);
+            OnPropertyChanged(nameof(ToggleStatus));
+        }
+    }
+}
 public sealed record TimelineEntry(string Title, string Description, string TimestampText, string OperationType, string ItemType);
 public sealed record SecuritySummaryItem(string Label, string Value, string Detail);
 public sealed record SecurityIssueItem(string Title, string Subtitle, string Category, string Severity, long PasswordId, PasswordEntry Entry, int SeverityWeight);
@@ -4503,14 +4552,30 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Capabilities.Clear();
         foreach (var capability in _sourceCapabilities)
         {
+            var canToggle = capability.Status is not (PlatformFeatureStatus.Unsupported or PlatformFeatureStatus.Planned);
             Capabilities.Add(new LocalizedPlatformCapability(
                 capability.Key,
                 _localization.Get($"Capability.{capability.Key}.Title"),
                 _localization.Get($"Capability.{capability.Key}.Description"),
                 LocalizeFeatureStatus(capability.Status),
                 _settingsService.IsFeatureEnabled(capability.Key),
-                capability.UnsupportedReason ?? ""));
+                canToggle,
+                _localization.FeatureEnabled,
+                _localization.FeatureDisabled,
+                capability.UnsupportedReason ?? "",
+                UpdateFeatureToggle));
         }
+    }
+
+    private void UpdateFeatureToggle(string key, bool isEnabled)
+    {
+        if (_isApplyingSettings)
+        {
+            return;
+        }
+
+        _settingsService.SetFeatureEnabled(key, isEnabled);
+        QueueSaveSettings();
     }
 
     private string LocalizeFeatureStatus(PlatformFeatureStatus status)
