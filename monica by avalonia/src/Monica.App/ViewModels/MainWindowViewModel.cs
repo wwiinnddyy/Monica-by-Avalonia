@@ -18,7 +18,13 @@ using Monica.Platform.Services;
 namespace Monica.App.ViewModels;
 
 public sealed record SettingsChoice(object Value, string Label);
-public sealed record LocalizedPlatformCapability(string Key, string Title, string Description, string Status);
+public sealed record LocalizedPlatformCapability(
+    string Key,
+    string Title,
+    string Description,
+    string Status,
+    bool IsEnabled,
+    string UnsupportedReason);
 public sealed record TimelineEntry(string Title, string Description, string TimestampText, string OperationType, string ItemType);
 public sealed record SecuritySummaryItem(string Label, string Value, string Detail);
 public sealed record SecurityIssueItem(string Title, string Subtitle, string Category, string Severity, long PasswordId, PasswordEntry Entry, int SeverityWeight);
@@ -4501,7 +4507,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 capability.Key,
                 _localization.Get($"Capability.{capability.Key}.Title"),
                 _localization.Get($"Capability.{capability.Key}.Description"),
-                LocalizeFeatureStatus(capability.Status)));
+                LocalizeFeatureStatus(capability.Status),
+                _settingsService.IsFeatureEnabled(capability.Key),
+                capability.UnsupportedReason ?? ""));
         }
     }
 
@@ -4512,6 +4520,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             PlatformFeatureStatus.Available => _localization.Available,
             PlatformFeatureStatus.DesktopEquivalent => _localization.DesktopEquivalent,
             PlatformFeatureStatus.PlatformLimited => _localization.PlatformLimited,
+            PlatformFeatureStatus.Unsupported => _localization.Get("Unsupported"),
             PlatformFeatureStatus.Planned => _localization.Planned,
             _ => status.ToString()
         };

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Monica.Core.Models;
 
 namespace Monica.App.Services;
 
@@ -39,6 +40,7 @@ public sealed class DesktopAppSettings
     public string SyncConflictStrategy { get; set; } = "ask";
     public bool OneDriveEnabled { get; set; }
     public bool MdbxLocalCacheEnabled { get; set; } = true;
+    public Dictionary<string, bool> FeatureToggles { get; set; } = [];
 }
 
 public interface IAppSettingsService
@@ -46,16 +48,26 @@ public interface IAppSettingsService
     DesktopAppSettings Current { get; }
     Task LoadAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(CancellationToken cancellationToken = default);
+    IReadOnlyDictionary<string, bool> GetFeatureToggles();
+    bool IsFeatureEnabled(string featureKey);
+    void SetFeatureEnabled(string featureKey, bool isEnabled);
 }
 
 public sealed class AppSettingsService : IAppSettingsService
 {
+    private static readonly IReadOnlyDictionary<string, bool> DefaultFeatureToggles =
+        FeatureCatalog.AndroidParityFeatures.ToDictionary(
+            item => item.Key,
+            item => item.Status is PlatformFeatureStatus.Available or PlatformFeatureStatus.DesktopEquivalent,
+            StringComparer.OrdinalIgnoreCase);
+
     private readonly string _settingsPath;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     public AppSettingsService(string? settingsPath = null)
     {
         _settingsPath = settingsPath ?? GetDefaultSettingsPath();
+        Normalize(Current);
     }
 
     public DesktopAppSettings Current { get; private set; } = new();
@@ -65,6 +77,7 @@ public sealed class AppSettingsService : IAppSettingsService
         if (!File.Exists(_settingsPath))
         {
             Current = new DesktopAppSettings();
+            Normalize(Current);
             return;
         }
 
@@ -103,6 +116,29 @@ public sealed class AppSettingsService : IAppSettingsService
         return Path.Combine(root, "settings.json");
     }
 
+    public IReadOnlyDictionary<string, bool> GetFeatureToggles()
+    {
+        NormalizeFeatureToggles(Current);
+        return Current.FeatureToggles;
+    }
+
+    public bool IsFeatureEnabled(string featureKey)
+    {
+        NormalizeFeatureToggles(Current);
+        return Current.FeatureToggles.TryGetValue(featureKey, out var isEnabled) && isEnabled;
+    }
+
+    public void SetFeatureEnabled(string featureKey, bool isEnabled)
+    {
+        NormalizeFeatureToggles(Current);
+        if (!DefaultFeatureToggles.ContainsKey(featureKey))
+        {
+            return;
+        }
+
+        Current.FeatureToggles[featureKey] = isEnabled;
+    }
+
     private static void Normalize(DesktopAppSettings settings)
     {
         settings.Language = NormalizeChoice(settings.Language, "system", "system", "en-US", "zh-CN");
@@ -123,6 +159,21 @@ public sealed class AppSettingsService : IAppSettingsService
         {
             settings.QuickSearchHotkey = "Ctrl+Shift+Space";
         }
+
+        NormalizeFeatureToggles(settings);
+    }
+
+    private static void NormalizeFeatureToggles(DesktopAppSettings settings)
+    {
+        var normalized = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, defaultValue) in DefaultFeatureToggles)
+        {
+            normalized[key] = settings.FeatureToggles.TryGetValue(key, out var existingValue)
+                ? existingValue
+                : defaultValue;
+        }
+
+        settings.FeatureToggles = normalized;
     }
 
     private static int Clamp(int value, int min, int max) => Math.Min(Math.Max(value, min), max);
@@ -136,4 +187,5 @@ public sealed class AppSettingsService : IAppSettingsService
 }
 
 [JsonSerializable(typeof(DesktopAppSettings))]
+[JsonSerializable(typeof(Dictionary<string, bool>))]
 internal sealed partial class AppSettingsJsonContext : JsonSerializerContext;

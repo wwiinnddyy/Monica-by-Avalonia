@@ -84,6 +84,37 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public async Task App_settings_initializes_feature_toggles_from_catalog()
+    {
+        var path = GetTempPath();
+        var settings = new AppSettingsService(path);
+        await settings.LoadAsync();
+
+        var toggles = settings.GetFeatureToggles();
+
+        Assert.All(FeatureCatalog.AndroidParityFeatures, feature => Assert.Contains(feature.Key, toggles.Keys));
+        Assert.True(settings.IsFeatureEnabled("passwords"));
+        Assert.False(settings.IsFeatureEnabled("autofill"));
+    }
+
+    [Fact]
+    public async Task App_settings_persists_feature_toggle_overrides_and_removes_unknown_keys()
+    {
+        var path = GetTempPath();
+        var settings = new AppSettingsService(path);
+        await settings.LoadAsync();
+        settings.SetFeatureEnabled("generator", false);
+        settings.Current.FeatureToggles["unknown-feature"] = true;
+        await settings.SaveAsync();
+
+        var reloaded = new AppSettingsService(path);
+        await reloaded.LoadAsync();
+
+        Assert.False(reloaded.IsFeatureEnabled("generator"));
+        Assert.False(reloaded.Current.FeatureToggles.ContainsKey("unknown-feature"));
+    }
+
+    [Fact]
     public async Task ViewModel_initializes_chinese_language_and_saves_changed_settings()
     {
         var settingsPath = GetTempPath();
