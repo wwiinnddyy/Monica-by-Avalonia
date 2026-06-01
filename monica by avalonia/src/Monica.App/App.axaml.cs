@@ -9,6 +9,7 @@ using Monica.Core.ImportExport;
 using Monica.Core.Services;
 using Monica.Data;
 using Monica.Data.Repositories;
+using Monica.Data.Services;
 using Monica.Platform.Services;
 
 namespace Monica.App;
@@ -46,6 +47,7 @@ public partial class App : Application
         services.AddSingleton<IDatabaseMigrator, DatabaseMigrator>();
         services.AddSingleton<IVaultCredentialStore, VaultCredentialStore>();
         services.AddSingleton<IMonicaRepository, MonicaRepository>();
+        services.AddSingleton<IMasterPasswordMaintenanceService, MasterPasswordMaintenanceService>();
         services.AddSingleton<ICryptoService, CryptoService>();
         services.AddSingleton<ITotpService, TotpService>();
         services.AddSingleton<IPasswordGeneratorService, PasswordGeneratorService>();
