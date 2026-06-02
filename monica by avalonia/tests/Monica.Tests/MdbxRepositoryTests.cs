@@ -488,6 +488,90 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_reads_password_attachment_metadata_from_mdbx_payload()
+    {
+        var repository = CreateRepository(out _, out var sqliteRepository);
+        await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "MDBX attachment metadata",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var content = "attachment metadata bytes"u8.ToArray();
+        var attachment = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "codes.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/codes.enc",
+            SizeBytes = content.Length
+        };
+
+        await repository.SaveAttachmentAsync(attachment, content);
+        await sqliteRepository.DeleteAttachmentAsync(attachment.Id, attachment);
+        await sqliteRepository.SaveAttachmentAsync(new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "sqlite-stale.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/stale.enc",
+            SizeBytes = 99
+        });
+
+        var attachments = await repository.GetAttachmentsAsync("PASSWORD", password.Id);
+        var grouped = await repository.GetAttachmentsByOwnerIdsAsync("PASSWORD", [password.Id]);
+
+        var saved = Assert.Single(attachments);
+        Assert.Equal("codes.txt", saved.FileName);
+        Assert.StartsWith("mdbx:", saved.StoragePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(["codes.txt"], grouped[password.Id].Select(item => item.FileName).ToArray());
+    }
+
+    [Fact]
+    public async Task Repository_updates_mdbx_attachment_metadata_after_delete()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Delete attachment metadata",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var first = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "first.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/first.enc",
+            SizeBytes = 5
+        };
+        var second = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "second.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/second.enc",
+            SizeBytes = 6
+        };
+        await repository.SaveAttachmentAsync(first, "first"u8.ToArray());
+        await repository.SaveAttachmentAsync(second, "second"u8.ToArray());
+
+        await repository.DeleteAttachmentAsync(first.Id, first);
+
+        var remaining = Assert.Single(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        Assert.Equal("second.txt", remaining.FileName);
+        Assert.Equal(1, bridge.CountActiveAttachments(database.WorkingCopyPath!));
+        Assert.Null(bridge.TryReadAttachmentContent(database.WorkingCopyPath!, first.StoragePath));
+        Assert.NotNull(bridge.TryReadAttachmentContent(database.WorkingCopyPath!, second.StoragePath));
+    }
+
+    [Fact]
     public async Task Repository_migrates_existing_password_attachment_content_to_mdbx_when_listed()
     {
         var contentStore = new FakeAttachmentContentStore();
