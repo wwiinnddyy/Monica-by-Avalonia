@@ -84,6 +84,12 @@ public sealed class MdbxUniffiNativeBridge : IMdbxNativeBridge
             return Task.FromResult(ToEntry(entry));
         }
 
+        public Task<MdbxNativeEntryRecord> MoveEntryAsync(string projectId, string entryId, string targetProjectId, CancellationToken cancellationToken = default)
+        {
+            var entry = Invoke(vault.GetType(), vault, ["MoveEntry", "move_entry"], projectId, entryId, targetProjectId);
+            return Task.FromResult(ToEntry(entry));
+        }
+
         public Task DeleteEntryAsync(string projectId, string entryId, CancellationToken cancellationToken = default)
         {
             Invoke(vault.GetType(), vault, ["DeleteEntry", "delete_entry"], projectId, entryId);

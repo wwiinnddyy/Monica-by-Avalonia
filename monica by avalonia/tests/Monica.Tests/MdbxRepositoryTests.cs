@@ -142,6 +142,83 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_roundtrips_categories_through_mdbx_projects()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var category = new Category
+        {
+            Name = "Work",
+            SortOrder = 3
+        };
+        await repository.SaveCategoryAsync(category);
+        var password = new PasswordEntry
+        {
+            Title = "Work login",
+            Username = "dev",
+            Password = "secret",
+            CategoryId = category.Id
+        };
+        var note = new SecureItem
+        {
+            ItemType = VaultItemType.Note,
+            Title = "Work note",
+            Notes = "project scoped",
+            CategoryId = category.Id
+        };
+
+        await repository.SavePasswordAsync(password);
+        await repository.SaveSecureItemAsync(note);
+
+        var categories = await repository.GetCategoriesAsync();
+        var reloadedCategory = Assert.Single(categories);
+        var reloadedPassword = Assert.Single(await repository.GetPasswordsAsync());
+        var reloadedNote = Assert.Single(await repository.GetSecureItemsAsync(VaultItemType.Note));
+
+        Assert.Equal(database.Id, reloadedCategory.MdbxDatabaseId);
+        Assert.False(string.IsNullOrWhiteSpace(reloadedCategory.MdbxFolderId));
+        Assert.Equal(category.Id, reloadedPassword.CategoryId);
+        Assert.Equal(category.Id, reloadedNote.CategoryId);
+        Assert.Contains("Work", bridge.GetProjectTitles(database.WorkingCopyPath!));
+        Assert.Equal("Work", bridge.GetProjectTitleForEntry(database.WorkingCopyPath!, reloadedPassword.MdbxFolderId!));
+        Assert.Equal("Work", bridge.GetProjectTitleForEntry(database.WorkingCopyPath!, reloadedNote.MdbxFolderId!));
+    }
+
+    [Fact]
+    public async Task Repository_moves_mdbx_password_entry_when_category_and_login_type_change()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var work = new Category { Name = "Work" };
+        var personal = new Category { Name = "Personal" };
+        await repository.SaveCategoryAsync(work);
+        await repository.SaveCategoryAsync(personal);
+        var password = new PasswordEntry
+        {
+            Title = "Movable login",
+            Username = "dev",
+            Password = "secret",
+            CategoryId = work.Id,
+            LoginType = PasswordLoginType.Password
+        };
+        await repository.SavePasswordAsync(password);
+        var originalMdbxEntryId = password.MdbxFolderId;
+
+        password.CategoryId = personal.Id;
+        password.LoginType = PasswordLoginType.SshKey;
+        password.SshKeyData = "private-key-material";
+        await repository.SavePasswordAsync(password);
+
+        var reloaded = Assert.Single(await repository.GetPasswordsAsync());
+
+        Assert.Equal(originalMdbxEntryId, reloaded.MdbxFolderId);
+        Assert.Equal(personal.Id, reloaded.CategoryId);
+        Assert.Equal(PasswordLoginType.SshKey, reloaded.LoginType);
+        Assert.Equal("Personal", bridge.GetProjectTitleForEntry(database.WorkingCopyPath!, reloaded.MdbxFolderId!));
+        Assert.Equal(1, bridge.CountEntries(database.WorkingCopyPath!));
+    }
+
+    [Fact]
     public async Task Repository_saves_new_password_attachment_content_to_mdbx()
     {
         var repository = CreateRepository(out var bridge);
@@ -283,6 +360,15 @@ public sealed class MdbxRepositoryTests
             var attachmentId = MdbxVaultStore.TryParseAttachmentStoragePath(storagePath);
             return attachmentId is null ? null : vault.TryReadAttachmentContent(attachmentId);
         }
+
+        public IReadOnlyList<string> GetProjectTitles(string path) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.GetProjectTitles() : [];
+
+        public string? GetProjectTitleForEntry(string path, string entryId) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.GetProjectTitleForEntry(entryId) : null;
+
+        public int CountEntries(string path) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.CountEntries() : 0;
     }
 
     private sealed class FakeAttachmentContentStore : IAttachmentContentStore
@@ -358,6 +444,19 @@ public sealed class MdbxRepositoryTests
                 Title = title,
                 PayloadJson = payloadJson
             };
+            _entries[index] = updated;
+            return Task.FromResult(updated);
+        }
+
+        public Task<MdbxNativeEntryRecord> MoveEntryAsync(string projectId, string entryId, string targetProjectId, CancellationToken cancellationToken = default)
+        {
+            var index = _entries.FindIndex(entry => entry.EntryId == entryId && entry.ProjectId == projectId);
+            if (index < 0)
+            {
+                throw new InvalidOperationException($"Entry '{entryId}' was not found.");
+            }
+
+            var updated = _entries[index] with { ProjectId = targetProjectId };
             _entries[index] = updated;
             return Task.FromResult(updated);
         }
@@ -458,6 +557,22 @@ public sealed class MdbxRepositoryTests
 
         public byte[]? TryReadAttachmentContent(string attachmentId) =>
             _attachmentContent.TryGetValue(attachmentId, out var content) ? content.ToArray() : null;
+
+        public IReadOnlyList<string> GetProjectTitles() =>
+            _projects.Select(project => project.Title).ToList();
+
+        public string? GetProjectTitleForEntry(string entryId)
+        {
+            var entry = _entries.FirstOrDefault(entry => string.Equals(entry.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                return null;
+            }
+
+            return _projects.FirstOrDefault(project => string.Equals(project.ProjectId, entry.ProjectId, StringComparison.OrdinalIgnoreCase))?.Title;
+        }
+
+        public int CountEntries() => _entries.Count;
 
         private MdbxNativeEntryRecord SetDeleted(string projectId, string entryId, bool deleted)
         {

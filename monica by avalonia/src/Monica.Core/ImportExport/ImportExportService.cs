@@ -641,6 +641,7 @@ internal sealed class CategoryDto
     public string Name { get; set; } = "";
     public int SortOrder { get; set; }
     public long? MdbxDatabaseId { get; set; }
+    public string? MdbxFolderId { get; set; }
 
     public static CategoryDto FromModel(Category source)
     {
@@ -649,7 +650,8 @@ internal sealed class CategoryDto
             Id = source.Id,
             Name = source.Name,
             SortOrder = source.SortOrder,
-            MdbxDatabaseId = source.MdbxDatabaseId
+            MdbxDatabaseId = source.MdbxDatabaseId,
+            MdbxFolderId = source.MdbxFolderId
         };
     }
 
@@ -660,7 +662,8 @@ internal sealed class CategoryDto
             Id = Id,
             Name = Name,
             SortOrder = SortOrder,
-            MdbxDatabaseId = MdbxDatabaseId
+            MdbxDatabaseId = MdbxDatabaseId,
+            MdbxFolderId = MdbxFolderId
         };
     }
 }

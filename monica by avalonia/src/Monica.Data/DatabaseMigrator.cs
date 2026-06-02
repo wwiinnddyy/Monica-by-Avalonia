@@ -9,7 +9,7 @@ public interface IDatabaseMigrator
 
 public sealed class DatabaseMigrator(ISqliteConnectionFactory connectionFactory) : IDatabaseMigrator
 {
-    public const int CurrentSchemaVersion = 68;
+    public const int CurrentSchemaVersion = 69;
 
     public async Task MigrateAsync(CancellationToken cancellationToken = default)
     {
@@ -17,7 +17,7 @@ public sealed class DatabaseMigrator(ISqliteConnectionFactory connectionFactory)
         if (legacyDetection.RequiresImport)
         {
             throw new InvalidOperationException(
-                "This database looks like a Monica for Windows PascalCase vault. Import it through the desktop migration flow before using the Avalonia v68 schema.");
+                "This database looks like a Monica for Windows PascalCase vault. Import it through the desktop migration flow before using the Avalonia v69 schema.");
         }
 
         await using var connection = connectionFactory.CreateConnection();
@@ -33,6 +33,7 @@ public sealed class DatabaseMigrator(ISqliteConnectionFactory connectionFactory)
         }
 
         await CreateCurrentSchemaAsync(connection, cancellationToken);
+        await EnsureColumnAsync(connection, "categories", "mdbx_folder_id", "TEXT DEFAULT NULL", cancellationToken);
         await EnsureColumnAsync(connection, "secure_items", "bound_password_id", "INTEGER DEFAULT NULL", cancellationToken);
         await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS index_secure_items_bound_password_id ON secure_items(bound_password_id);", cancellationToken);
         await ExecuteAsync(connection, $"PRAGMA user_version={CurrentSchemaVersion};", cancellationToken);
@@ -84,7 +85,8 @@ public sealed class DatabaseMigrator(ISqliteConnectionFactory connectionFactory)
             id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
             name TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
-            mdbx_database_id INTEGER DEFAULT NULL
+            mdbx_database_id INTEGER DEFAULT NULL,
+            mdbx_folder_id TEXT DEFAULT NULL
         );
         """,
         """

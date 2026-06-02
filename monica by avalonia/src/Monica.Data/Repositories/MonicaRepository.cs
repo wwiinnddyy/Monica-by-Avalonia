@@ -614,8 +614,8 @@ public sealed class MonicaRepository(
     {
         await migrator.MigrateAsync(cancellationToken);
         await using var connection = connectionFactory.CreateConnection();
-        var rows = await connection.QueryAsync<CategoryRow>("SELECT id, name, sort_order, mdbx_database_id FROM categories ORDER BY sort_order ASC, name ASC");
-        return rows.Select(row => new Category { Id = row.Id, Name = row.Name, SortOrder = row.SortOrder, MdbxDatabaseId = row.MdbxDatabaseId }).ToList();
+        var rows = await connection.QueryAsync<CategoryRow>("SELECT id, name, sort_order, mdbx_database_id, mdbx_folder_id FROM categories ORDER BY sort_order ASC, name ASC");
+        return rows.Select(row => new Category { Id = row.Id, Name = row.Name, SortOrder = row.SortOrder, MdbxDatabaseId = row.MdbxDatabaseId, MdbxFolderId = row.MdbxFolderId }).ToList();
     }
 
     public async Task<long> SaveCategoryAsync(Category category, CancellationToken cancellationToken = default)
@@ -625,14 +625,14 @@ public sealed class MonicaRepository(
         if (category.Id == 0)
         {
             category.Id = await connection.ExecuteScalarAsync<long>(
-                "INSERT INTO categories(name, sort_order, mdbx_database_id) VALUES(@Name, @SortOrder, @MdbxDatabaseId); SELECT last_insert_rowid();",
-                new { category.Name, category.SortOrder, category.MdbxDatabaseId });
+                "INSERT INTO categories(name, sort_order, mdbx_database_id, mdbx_folder_id) VALUES(@Name, @SortOrder, @MdbxDatabaseId, @MdbxFolderId); SELECT last_insert_rowid();",
+                new { category.Name, category.SortOrder, category.MdbxDatabaseId, category.MdbxFolderId });
         }
         else
         {
             await connection.ExecuteAsync(
-                "UPDATE categories SET name=@Name, sort_order=@SortOrder, mdbx_database_id=@MdbxDatabaseId WHERE id=@Id",
-                new { category.Id, category.Name, category.SortOrder, category.MdbxDatabaseId });
+                "UPDATE categories SET name=@Name, sort_order=@SortOrder, mdbx_database_id=@MdbxDatabaseId, mdbx_folder_id=@MdbxFolderId WHERE id=@Id",
+                new { category.Id, category.Name, category.SortOrder, category.MdbxDatabaseId, category.MdbxFolderId });
         }
 
         return category.Id;
@@ -1413,6 +1413,7 @@ public sealed class MonicaRepository(
         public string Name { get; init; } = "";
         public int SortOrder { get; init; }
         public long? MdbxDatabaseId { get; init; }
+        public string? MdbxFolderId { get; init; }
     }
 
     private sealed class MdbxDatabaseRow

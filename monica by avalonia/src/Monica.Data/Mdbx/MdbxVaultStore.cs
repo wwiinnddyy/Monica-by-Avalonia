@@ -7,12 +7,17 @@ namespace Monica.Data.Mdbx;
 public interface IMdbxVaultStore
 {
     bool IsAvailable { get; }
+    Task<Category> SaveCategoryAsync(LocalMdbxDatabase database, Category category, CancellationToken cancellationToken = default);
     Task<PasswordEntry> SavePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default);
+    Task<PasswordEntry> SavePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, IReadOnlyDictionary<long, Category> categories, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PasswordEntry>> GetPasswordsAsync(LocalMdbxDatabase database, bool includeDeleted = false, bool includeArchived = false, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PasswordEntry>> GetPasswordsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, bool includeDeleted = false, bool includeArchived = false, CancellationToken cancellationToken = default);
     Task SoftDeletePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default);
     Task RestorePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default);
     Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
+    Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, IReadOnlyDictionary<long, Category> categories, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default);
     Task SoftDeleteSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
     Task RestoreSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
     Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default);
@@ -23,6 +28,8 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 {
     private const string DefaultProjectTitle = "Monica";
     private const string DeviceId = "monica-avalonia";
+    private static readonly string[] PasswordEntryTypes = ["login", "ssh-key"];
+    private static readonly string[] SecureEntryTypes = ["note", "totp", "card", "document-ref"];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -33,34 +40,52 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
     public bool IsAvailable => nativeBridge.IsAvailable;
 
-    public async Task<PasswordEntry> SavePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default)
+    public async Task<Category> SaveCategoryAsync(LocalMdbxDatabase database, Category category, CancellationToken cancellationToken = default)
     {
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
+        var project = await EnsureProjectAsync(vault, category.MdbxFolderId, category.Name, cancellationToken);
+        category.MdbxDatabaseId = database.Id;
+        category.MdbxFolderId = project.ProjectId;
+        return category;
+    }
+
+    public Task<PasswordEntry> SavePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default) =>
+        SavePasswordAsync(database, entry, new Dictionary<long, Category>(), cancellationToken);
+
+    public async Task<PasswordEntry> SavePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, IReadOnlyDictionary<long, Category> categories, CancellationToken cancellationToken = default)
+    {
+        var vault = await OpenAsync(database, cancellationToken);
+        using var _ = vault;
+        var project = await ResolveProjectAsync(vault, entry.CategoryId, categories, cancellationToken);
         var entryType = ToMdbxEntryType(entry);
         var payload = SerializePayload("password", entry);
-        var record = string.IsNullOrWhiteSpace(entry.MdbxFolderId)
-            ? await vault.CreateEntryAsync(project.ProjectId, entryType, entry.Title, payload, cancellationToken)
-            : await vault.UpdateEntryAsync(project.ProjectId, entry.MdbxFolderId!, entryType, entry.Title, payload, cancellationToken);
+        var record = await SaveEntryAsync(vault, project.ProjectId, entry.MdbxFolderId, PasswordEntryTypes, entryType, entry.Title, payload, cancellationToken);
 
         entry.MdbxDatabaseId = database.Id;
         entry.MdbxFolderId = record.EntryId;
         return entry;
     }
 
-    public async Task<IReadOnlyList<PasswordEntry>> GetPasswordsAsync(LocalMdbxDatabase database, bool includeDeleted = false, bool includeArchived = false, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<PasswordEntry>> GetPasswordsAsync(LocalMdbxDatabase database, bool includeDeleted = false, bool includeArchived = false, CancellationToken cancellationToken = default) =>
+        GetPasswordsAsync(database, [], includeDeleted, includeArchived, cancellationToken);
+
+    public async Task<IReadOnlyList<PasswordEntry>> GetPasswordsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, bool includeDeleted = false, bool includeArchived = false, CancellationToken cancellationToken = default)
     {
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
+        var projects = await EnsureProjectsForReadAsync(vault, cancellationToken);
+        var categoryByProjectId = BuildCategoryByProjectId(categories, projects);
         var records = new List<MdbxNativeEntryRecord>();
-        foreach (var entryType in new[] { "login", "ssh-key" })
+        foreach (var project in projects)
         {
-            records.AddRange(await vault.ListEntriesAsync(project.ProjectId, entryType, cancellationToken));
-            if (includeDeleted)
+            foreach (var entryType in PasswordEntryTypes)
             {
-                records.AddRange(await vault.ListDeletedEntriesAsync(project.ProjectId, entryType, cancellationToken));
+                records.AddRange(await vault.ListEntriesAsync(project.ProjectId, entryType, cancellationToken));
+                if (includeDeleted)
+                {
+                    records.AddRange(await vault.ListDeletedEntriesAsync(project.ProjectId, entryType, cancellationToken));
+                }
             }
         }
 
@@ -73,6 +98,11 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
                 var entry = item.Entry!;
                 entry.MdbxDatabaseId = database.Id;
                 entry.MdbxFolderId = record.EntryId;
+                if (categoryByProjectId.TryGetValue(record.ProjectId, out var categoryId))
+                {
+                    entry.CategoryId = categoryId;
+                }
+
                 entry.IsDeleted = record.Deleted;
                 return entry;
             })
@@ -93,8 +123,11 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
-        await vault.DeleteEntryAsync(project.ProjectId, entry.MdbxFolderId!, cancellationToken);
+        var record = await FindEntryAsync(vault, entry.MdbxFolderId!, PasswordEntryTypes, includeDeleted: true, cancellationToken);
+        if (record is not null)
+        {
+            await vault.DeleteEntryAsync(record.ProjectId, entry.MdbxFolderId!, cancellationToken);
+        }
     }
 
     public async Task RestorePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default)
@@ -106,41 +139,52 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
-        await vault.RestoreEntryAsync(project.ProjectId, entry.MdbxFolderId!, cancellationToken);
+        var record = await FindEntryAsync(vault, entry.MdbxFolderId!, PasswordEntryTypes, includeDeleted: true, cancellationToken);
+        if (record is not null)
+        {
+            await vault.RestoreEntryAsync(record.ProjectId, entry.MdbxFolderId!, cancellationToken);
+        }
     }
 
-    public async Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default)
+    public Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default) =>
+        SaveSecureItemAsync(database, item, new Dictionary<long, Category>(), cancellationToken);
+
+    public async Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, IReadOnlyDictionary<long, Category> categories, CancellationToken cancellationToken = default)
     {
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
+        var project = await ResolveProjectAsync(vault, item.CategoryId, categories, cancellationToken);
         var entryType = ToMdbxEntryType(item.ItemType);
         var payload = SerializePayload("secure-item", item);
-        var record = string.IsNullOrWhiteSpace(item.MdbxFolderId)
-            ? await vault.CreateEntryAsync(project.ProjectId, entryType, item.Title, payload, cancellationToken)
-            : await vault.UpdateEntryAsync(project.ProjectId, item.MdbxFolderId!, entryType, item.Title, payload, cancellationToken);
+        var record = await SaveEntryAsync(vault, project.ProjectId, item.MdbxFolderId, SecureEntryTypes, entryType, item.Title, payload, cancellationToken);
 
         item.MdbxDatabaseId = database.Id;
         item.MdbxFolderId = record.EntryId;
         return item;
     }
 
-    public async Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default) =>
+        GetSecureItemsAsync(database, [], itemType, includeDeleted, cancellationToken);
+
+    public async Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default)
     {
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
+        var projects = await EnsureProjectsForReadAsync(vault, cancellationToken);
+        var categoryByProjectId = BuildCategoryByProjectId(categories, projects);
         var entryTypes = itemType is null
-            ? new[] { "note", "totp", "card", "document-ref" }
+            ? SecureEntryTypes
             : [ToMdbxEntryType(itemType.Value)];
         var records = new List<MdbxNativeEntryRecord>();
-        foreach (var entryType in entryTypes)
+        foreach (var project in projects)
         {
-            records.AddRange(await vault.ListEntriesAsync(project.ProjectId, entryType, cancellationToken));
-            if (includeDeleted)
+            foreach (var entryType in entryTypes)
             {
-                records.AddRange(await vault.ListDeletedEntriesAsync(project.ProjectId, entryType, cancellationToken));
+                records.AddRange(await vault.ListEntriesAsync(project.ProjectId, entryType, cancellationToken));
+                if (includeDeleted)
+                {
+                    records.AddRange(await vault.ListDeletedEntriesAsync(project.ProjectId, entryType, cancellationToken));
+                }
             }
         }
 
@@ -153,6 +197,11 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
                 var secureItem = item.Item!;
                 secureItem.MdbxDatabaseId = database.Id;
                 secureItem.MdbxFolderId = record.EntryId;
+                if (categoryByProjectId.TryGetValue(record.ProjectId, out var categoryId))
+                {
+                    secureItem.CategoryId = categoryId;
+                }
+
                 secureItem.IsDeleted = record.Deleted;
                 return secureItem;
             })
@@ -172,8 +221,11 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
-        await vault.DeleteEntryAsync(project.ProjectId, item.MdbxFolderId!, cancellationToken);
+        var record = await FindEntryAsync(vault, item.MdbxFolderId!, SecureEntryTypes, includeDeleted: true, cancellationToken);
+        if (record is not null)
+        {
+            await vault.DeleteEntryAsync(record.ProjectId, item.MdbxFolderId!, cancellationToken);
+        }
     }
 
     public async Task RestoreSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default)
@@ -185,8 +237,11 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
-        await vault.RestoreEntryAsync(project.ProjectId, item.MdbxFolderId!, cancellationToken);
+        var record = await FindEntryAsync(vault, item.MdbxFolderId!, SecureEntryTypes, includeDeleted: true, cancellationToken);
+        if (record is not null)
+        {
+            await vault.RestoreEntryAsync(record.ProjectId, item.MdbxFolderId!, cancellationToken);
+        }
     }
 
     public async Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default)
@@ -198,7 +253,10 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
-        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
+        var entryRecord = await FindEntryAsync(vault, entry.MdbxFolderId!, PasswordEntryTypes, includeDeleted: true, cancellationToken);
+        var project = entryRecord is null
+            ? await EnsureDefaultProjectAsync(vault, cancellationToken)
+            : new MdbxNativeProjectRecord(entryRecord.ProjectId, "", Deleted: false);
         var metadata = await vault.CreateAttachmentMetadataAsync(
             project.ProjectId,
             entry.MdbxFolderId,
@@ -250,9 +308,139 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
 
     private static async Task<MdbxNativeProjectRecord> EnsureDefaultProjectAsync(IMdbxNativeVault vault, CancellationToken cancellationToken)
     {
+        return await EnsureProjectAsync(vault, null, DefaultProjectTitle, cancellationToken);
+    }
+
+    private static async Task<MdbxNativeProjectRecord> EnsureProjectAsync(IMdbxNativeVault vault, string? projectId, string title, CancellationToken cancellationToken)
+    {
         var projects = await vault.ListProjectsAsync(false, cancellationToken);
-        return projects.FirstOrDefault(project => string.Equals(project.Title, DefaultProjectTitle, StringComparison.OrdinalIgnoreCase))
-            ?? await vault.CreateProjectAsync(DefaultProjectTitle, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            var existingById = projects.FirstOrDefault(project => string.Equals(project.ProjectId, projectId, StringComparison.OrdinalIgnoreCase));
+            if (existingById is not null)
+            {
+                return existingById;
+            }
+        }
+
+        var normalizedTitle = string.IsNullOrWhiteSpace(title) ? DefaultProjectTitle : title.Trim();
+        return projects.FirstOrDefault(project => string.Equals(project.Title, normalizedTitle, StringComparison.OrdinalIgnoreCase))
+            ?? await vault.CreateProjectAsync(normalizedTitle, cancellationToken);
+    }
+
+    private static async Task<IReadOnlyList<MdbxNativeProjectRecord>> EnsureProjectsForReadAsync(IMdbxNativeVault vault, CancellationToken cancellationToken)
+    {
+        var projects = (await vault.ListProjectsAsync(false, cancellationToken)).ToList();
+        if (projects.Any(project => string.Equals(project.Title, DefaultProjectTitle, StringComparison.OrdinalIgnoreCase)))
+        {
+            return projects;
+        }
+
+        projects.Add(await vault.CreateProjectAsync(DefaultProjectTitle, cancellationToken));
+        return projects;
+    }
+
+    private static async Task<MdbxNativeProjectRecord> ResolveProjectAsync(
+        IMdbxNativeVault vault,
+        long? categoryId,
+        IReadOnlyDictionary<long, Category> categories,
+        CancellationToken cancellationToken)
+    {
+        if (categoryId is { } id && categories.TryGetValue(id, out var category))
+        {
+            return await EnsureProjectAsync(vault, category.MdbxFolderId, category.Name, cancellationToken);
+        }
+
+        return await EnsureDefaultProjectAsync(vault, cancellationToken);
+    }
+
+    private static async Task<MdbxNativeEntryRecord> SaveEntryAsync(
+        IMdbxNativeVault vault,
+        string targetProjectId,
+        string? entryId,
+        IReadOnlyList<string> searchEntryTypes,
+        string entryType,
+        string title,
+        string payloadJson,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return await vault.CreateEntryAsync(targetProjectId, entryType, title, payloadJson, cancellationToken);
+        }
+
+        var existing = await FindEntryAsync(vault, entryId, searchEntryTypes, includeDeleted: true, cancellationToken);
+        if (existing is null)
+        {
+            return await vault.CreateEntryAsync(targetProjectId, entryType, title, payloadJson, cancellationToken);
+        }
+
+        if (!string.Equals(existing.ProjectId, targetProjectId, StringComparison.OrdinalIgnoreCase))
+        {
+            await vault.MoveEntryAsync(existing.ProjectId, entryId, targetProjectId, cancellationToken);
+        }
+
+        return await vault.UpdateEntryAsync(targetProjectId, entryId, entryType, title, payloadJson, cancellationToken);
+    }
+
+    private static async Task<MdbxNativeEntryRecord?> FindEntryAsync(
+        IMdbxNativeVault vault,
+        string entryId,
+        IReadOnlyList<string> entryTypes,
+        bool includeDeleted,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return null;
+        }
+
+        var projects = await EnsureProjectsForReadAsync(vault, cancellationToken);
+        foreach (var project in projects)
+        {
+            foreach (var entryType in entryTypes)
+            {
+                var active = await vault.ListEntriesAsync(project.ProjectId, entryType, cancellationToken);
+                var match = active.FirstOrDefault(entry => string.Equals(entry.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                {
+                    return match;
+                }
+
+                if (includeDeleted)
+                {
+                    var deleted = await vault.ListDeletedEntriesAsync(project.ProjectId, entryType, cancellationToken);
+                    match = deleted.FirstOrDefault(entry => string.Equals(entry.EntryId, entryId, StringComparison.OrdinalIgnoreCase));
+                    if (match is not null)
+                    {
+                        return match;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static Dictionary<string, long> BuildCategoryByProjectId(IReadOnlyList<Category> categories, IReadOnlyList<MdbxNativeProjectRecord> projects)
+    {
+        var categoryByProjectId = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var projectByTitle = projects.ToDictionary(project => project.Title, project => project.ProjectId, StringComparer.OrdinalIgnoreCase);
+        foreach (var category in categories)
+        {
+            if (!string.IsNullOrWhiteSpace(category.MdbxFolderId))
+            {
+                categoryByProjectId[category.MdbxFolderId] = category.Id;
+            }
+            else if (!string.IsNullOrWhiteSpace(category.Name) &&
+                     projectByTitle.TryGetValue(category.Name, out var projectId) &&
+                     !string.Equals(category.Name, DefaultProjectTitle, StringComparison.OrdinalIgnoreCase))
+            {
+                categoryByProjectId[projectId] = category.Id;
+            }
+        }
+
+        return categoryByProjectId;
     }
 
     private static string SerializePayload<T>(string kind, T data) =>

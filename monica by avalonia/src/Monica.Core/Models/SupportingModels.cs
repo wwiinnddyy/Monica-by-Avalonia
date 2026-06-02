@@ -6,6 +6,7 @@ public sealed class Category
     public string Name { get; set; } = "";
     public int SortOrder { get; set; }
     public long? MdbxDatabaseId { get; set; }
+    public string? MdbxFolderId { get; set; }
 }
 
 public sealed class OperationLog
