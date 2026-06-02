@@ -14,6 +14,7 @@ public interface IImportExportService
     MonicaExportPackage ImportJson(string json);
     string ExportPasswordCsv(IEnumerable<PasswordEntry> passwords);
     string ExportTotpCsv(IEnumerable<SecureItem> secureItems);
+    string ExportNoteCsv(IEnumerable<SecureItem> secureItems);
     string ExportAegisJson(IEnumerable<SecureItem> secureItems);
     IReadOnlyList<SecureItem> ImportTotpCsv(string csv);
     IReadOnlyList<SecureItem> ImportAegisJson(string json);
@@ -143,6 +144,43 @@ public sealed class ImportExportService : IImportExportService
             csv.WriteField(item.Notes);
             csv.WriteField(item.IsFavorite.ToString());
             csv.WriteField("");
+            csv.WriteField(item.CreatedAt.ToUnixTimeMilliseconds());
+            csv.WriteField(item.UpdatedAt.ToUnixTimeMilliseconds());
+            csv.NextRecord();
+        }
+
+        return writer.ToString();
+    }
+
+    public string ExportNoteCsv(IEnumerable<SecureItem> secureItems)
+    {
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        using var csv = new CsvWriter(writer, CreateCsvConfiguration());
+
+        foreach (var header in SecureItemCsvHeaders)
+        {
+            csv.WriteField(header);
+        }
+
+        csv.NextRecord();
+
+        foreach (var item in secureItems.Where(item => item.ItemType == VaultItemType.Note))
+        {
+            var decoded = NoteContentCodec.DecodeFromItem(item);
+            var payload = NoteContentCodec.BuildSavePayload(
+                item.Title,
+                decoded.Content,
+                string.Join(",", decoded.Tags),
+                decoded.IsMarkdown,
+                NoteContentCodec.DecodeImagePaths(item.ImagePaths));
+
+            csv.WriteField(item.Id);
+            csv.WriteField("NOTE");
+            csv.WriteField(payload.Title);
+            csv.WriteField(payload.ItemData);
+            csv.WriteField(payload.NotesCache);
+            csv.WriteField(item.IsFavorite.ToString());
+            csv.WriteField(payload.ImagePaths);
             csv.WriteField(item.CreatedAt.ToUnixTimeMilliseconds());
             csv.WriteField(item.UpdatedAt.ToUnixTimeMilliseconds());
             csv.NextRecord();

@@ -214,6 +214,40 @@ public sealed class CoreServicesTests
     }
 
     [Fact]
+    public void Import_export_exports_notes_as_winui_compatible_csv()
+    {
+        var service = new ImportExportService();
+        var payload = NoteContentCodec.BuildSavePayload("Recovery", "# backup codes\nalpha", "ops, personal", true, ["inline.png"]);
+        var items = new[]
+        {
+            new SecureItem
+            {
+                Id = 51,
+                ItemType = VaultItemType.Note,
+                Title = payload.Title,
+                Notes = payload.NotesCache,
+                ImagePaths = payload.ImagePaths,
+                IsFavorite = true,
+                CreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(3000),
+                UpdatedAt = DateTimeOffset.FromUnixTimeMilliseconds(4000),
+                ItemData = payload.ItemData
+            },
+            new SecureItem { Id = 52, ItemType = VaultItemType.Totp, Title = "Authenticator", ItemData = "{}" }
+        };
+
+        var csv = service.ExportNoteCsv(items);
+
+        Assert.Contains("ID,Type,Title,Data,Notes,IsFavorite,ImagePaths,CreatedAt,UpdatedAt", csv);
+        Assert.Contains("51,NOTE,Recovery", csv);
+        Assert.Contains("backup codes", csv);
+        Assert.Contains("ops", csv);
+        Assert.Contains("inline.png", csv);
+        Assert.Contains("True", csv);
+        Assert.Contains("3000,4000", csv);
+        Assert.DoesNotContain("Authenticator", csv);
+    }
+
+    [Fact]
     public void Import_export_imports_winui_compatible_totp_csv()
     {
         var service = new ImportExportService();

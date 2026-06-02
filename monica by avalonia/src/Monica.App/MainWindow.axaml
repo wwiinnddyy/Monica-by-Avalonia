@@ -1778,7 +1778,7 @@
                                         <fa:FASymbolIconSource Symbol="ProtectedDocument" />
                                     </fa:FASettingsExpander.IconSource>
                                     <StackPanel Spacing="12">
-                                        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                                        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                                             <Button Command="{Binding SaveMonicaJsonExportCommand}" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="{Binding FilePickerIntegrationStatusText}">
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                                     <ic:FluentIcon Icon="Save" FontSize="20" />
@@ -1797,7 +1797,13 @@
                                                     <TextBlock Text="{Binding L.SaveTotpCsvExport}" />
                                                 </StackPanel>
                                             </Button>
-                                            <Button Grid.Column="3" Command="{Binding SaveAegisJsonExportCommand}" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="{Binding FilePickerIntegrationStatusText}">
+                                            <Button Grid.Column="3" Command="{Binding SaveNoteCsvExportCommand}" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="{Binding FilePickerIntegrationStatusText}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <ic:FluentIcon Icon="Save" FontSize="20" />
+                                                    <TextBlock Text="{Binding L.SaveNoteCsvExport}" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Grid.Column="4" Command="{Binding SaveAegisJsonExportCommand}" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="{Binding FilePickerIntegrationStatusText}">
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                                     <ic:FluentIcon Icon="Save" FontSize="20" />
                                                     <TextBlock Text="{Binding L.SaveAegisExport}" />
@@ -1820,6 +1826,18 @@
                                         </StackPanel>
                                         <TextBlock Text="{Binding L.ExportTotpCsvPreview}" FontWeight="SemiBold" Margin="0,8,0,0" />
                                         <TextBox Text="{Binding ExportTotpCsvPreview}" AcceptsReturn="True" MinHeight="160" TextWrapping="Wrap" />
+                                        <StackPanel Spacing="8" Margin="0,8,0,0">
+                                            <TextBlock Text="{Binding L.ExportNoteCsv}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding L.ExportNoteCsvDescription}" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <Button Command="{Binding ExportNoteCsvCommand}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <ic:FluentIcon Icon="ArrowDownload" FontSize="20" />
+                                                    <TextBlock Text="{Binding L.ExportNoteCsv}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding L.ExportNoteCsvPreview}" FontWeight="SemiBold" Margin="0,8,0,0" />
+                                        <TextBox Text="{Binding ExportNoteCsvPreview}" AcceptsReturn="True" MinHeight="160" TextWrapping="Wrap" />
                                         <StackPanel Spacing="8" Margin="0,8,0,0">
                                             <TextBlock Text="{Binding L.ExportAegisJson}" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding L.ExportAegisJsonDescription}" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />

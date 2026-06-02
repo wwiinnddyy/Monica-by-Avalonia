@@ -397,6 +397,39 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public async Task ViewModel_saves_note_csv_export_through_file_picker()
+    {
+        var integration = new PlatformIntegrationService("TestOS",
+        [
+            PlatformIntegrationService.Available(PlatformFeatureKeys.FilePicker, "File picking works.")
+        ]);
+        var filePicker = new CapturingFileSystemPickerService(integration, null, "notes.csv");
+        var viewModel = CreateViewModel(
+            GetTempPath(),
+            platformIntegrationService: integration,
+            fileSystemPickerService: filePicker);
+        var payload = NoteContentCodec.BuildSavePayload("Recovery", "# backup codes\nalpha", "ops", true, ["inline.png"]);
+        viewModel.NoteItems.Add(new SecureItem
+        {
+            Title = payload.Title,
+            Notes = payload.NotesCache,
+            ImagePaths = payload.ImagePaths,
+            ItemType = VaultItemType.Note,
+            ItemData = payload.ItemData
+        });
+
+        await viewModel.SaveNoteCsvExportCommand.ExecuteAsync(null);
+
+        Assert.Contains("ID,Type,Title,Data,Notes,IsFavorite,ImagePaths,CreatedAt,UpdatedAt", filePicker.SavedContent);
+        Assert.Contains("NOTE", filePicker.SavedContent);
+        Assert.Contains("backup codes", filePicker.SavedContent);
+        Assert.Contains("inline.png", filePicker.SavedContent);
+        Assert.EndsWith(".csv", filePicker.SuggestedFileName, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Notes CSV", Assert.Single(filePicker.SaveFileTypes).Name);
+        Assert.Equal(viewModel.L.Format("SavedExportFileFormat", "notes.csv"), viewModel.StatusMessage);
+    }
+
+    [Fact]
     public async Task ViewModel_saves_aegis_json_export_through_file_picker()
     {
         var integration = new PlatformIntegrationService("TestOS",

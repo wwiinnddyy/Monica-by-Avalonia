@@ -142,6 +142,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [
         new("TOTP CSV", ["*.csv"])
     ];
+    private static readonly PlatformFilePickerFileType[] NoteCsvFileTypes =
+    [
+        new("Notes CSV", ["*.csv"])
+    ];
     private static readonly PlatformFilePickerFileType[] AegisJsonFileTypes =
     [
         new("Aegis JSON", ["*.json"])
@@ -439,6 +443,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private string _exportTotpCsvPreview = "";
+
+    [ObservableProperty]
+    private string _exportNoteCsvPreview = "";
 
     [ObservableProperty]
     private string _exportAegisPreview = "";
@@ -2642,6 +2649,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ExportNoteCsv()
+    {
+        ExportNoteCsvPreview = BuildNoteCsvExport();
+        StatusMessage = _localization.Get("ExportedNoteCsv");
+    }
+
+    [RelayCommand]
     private void ExportAegisJson()
     {
         ExportAegisPreview = BuildAegisJsonExport();
@@ -2771,6 +2785,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
             $"monica_totp_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.csv",
             ExportTotpCsvPreview,
             TotpCsvFileTypes);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
+    private async Task SaveNoteCsvExportAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ExportNoteCsvPreview))
+        {
+            ExportNoteCsv();
+        }
+
+        await SaveExportTextAsync(
+            _localization.Get("ExportNoteCsv"),
+            $"monica_notes_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.csv",
+            ExportNoteCsvPreview,
+            NoteCsvFileTypes);
     }
 
     [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
@@ -3028,6 +3057,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
             .ToArray();
 
         return _importExportService.ExportTotpCsv(exportTotps);
+    }
+
+    private string BuildNoteCsvExport()
+    {
+        var exportNotes = NoteItems
+            .Select(item => CloneSecureItemForExport(item))
+            .ToArray();
+
+        return _importExportService.ExportNoteCsv(exportNotes);
     }
 
     private string BuildAegisJsonExport()
@@ -5374,6 +5412,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SaveMonicaJsonExportCommand.NotifyCanExecuteChanged();
         SavePasswordCsvExportCommand.NotifyCanExecuteChanged();
         SaveTotpCsvExportCommand.NotifyCanExecuteChanged();
+        SaveNoteCsvExportCommand.NotifyCanExecuteChanged();
         SaveAegisJsonExportCommand.NotifyCanExecuteChanged();
     }
 
