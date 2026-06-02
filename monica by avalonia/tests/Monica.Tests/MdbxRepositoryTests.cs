@@ -140,6 +140,40 @@ public sealed class MdbxRepositoryTests
         Assert.False(string.IsNullOrWhiteSpace(mirroredNote.MdbxFolderId));
     }
 
+    [Fact]
+    public async Task Repository_saves_new_password_attachment_content_to_mdbx()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "With attachment",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var content = "attachment bytes"u8.ToArray();
+        var attachment = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "recovery.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/recovery.enc",
+            SizeBytes = content.Length
+        };
+
+        await repository.SaveAttachmentAsync(attachment, content);
+
+        var saved = Assert.Single(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        Assert.StartsWith("mdbx:", saved.StoragePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(content, bridge.ReadAttachmentContent(database.WorkingCopyPath!, saved.StoragePath));
+
+        await repository.DeleteAttachmentAsync(saved.Id, saved);
+
+        Assert.Empty(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        Assert.Null(bridge.TryReadAttachmentContent(database.WorkingCopyPath!, saved.StoragePath));
+    }
+
     private static IMonicaRepository CreateRepository(out FakeMdbxNativeBridge bridge)
     {
         var factory = new SqliteConnectionFactory(GetTempDatabasePath());
@@ -148,9 +182,9 @@ public sealed class MdbxRepositoryTests
         return new MdbxBackedMonicaRepository(inner, new MdbxVaultStore(bridge));
     }
 
-    private static async Task SaveDefaultMdbxDatabaseAsync(IMonicaRepository repository)
+    private static async Task<LocalMdbxDatabase> SaveDefaultMdbxDatabaseAsync(IMonicaRepository repository)
     {
-        await repository.SaveMdbxDatabaseAsync(new LocalMdbxDatabase
+        var database = new LocalMdbxDatabase
         {
             Name = "Local",
             FilePath = Path.Combine(Path.GetTempPath(), "monica-tests", $"{Guid.NewGuid():N}.mdbx"),
@@ -161,7 +195,9 @@ public sealed class MdbxRepositoryTests
             IsDefault = true,
             IsOfflineAvailable = true,
             LastSyncStatus = SyncStatus.LocalOnly
-        });
+        };
+        await repository.SaveMdbxDatabaseAsync(database);
+        return database;
     }
 
     private static string GetTempDatabasePath()
@@ -196,14 +232,32 @@ public sealed class MdbxRepositoryTests
 
             return Task.FromResult<IMdbxNativeVault>(vault);
         }
+
+        public byte[] ReadAttachmentContent(string path, string storagePath) =>
+            TryReadAttachmentContent(path, storagePath)
+            ?? throw new InvalidOperationException($"Attachment '{storagePath}' was not found.");
+
+        public byte[]? TryReadAttachmentContent(string path, string storagePath)
+        {
+            if (!_vaults.TryGetValue(path, out var vault))
+            {
+                return null;
+            }
+
+            var attachmentId = MdbxVaultStore.TryParseAttachmentStoragePath(storagePath);
+            return attachmentId is null ? null : vault.TryReadAttachmentContent(attachmentId);
+        }
     }
 
     private sealed class FakeMdbxNativeVault(string deviceId) : IMdbxNativeVault
     {
         private readonly List<MdbxNativeProjectRecord> _projects = [];
         private readonly List<MdbxNativeEntryRecord> _entries = [];
+        private readonly List<MdbxNativeAttachmentRecord> _attachments = [];
+        private readonly Dictionary<string, byte[]> _attachmentContent = [];
         private int _nextProjectId = 1;
         private int _nextEntryId = 1;
+        private int _nextAttachmentId = 1;
 
         public Task<MdbxNativeVaultInfo> GetInfoAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(new MdbxNativeVaultInfo("fake-vault", deviceId));
@@ -260,6 +314,94 @@ public sealed class MdbxRepositoryTests
 
         public Task<MdbxNativeEntryRecord> RestoreEntryAsync(string projectId, string entryId, CancellationToken cancellationToken = default) =>
             Task.FromResult(SetDeleted(projectId, entryId, deleted: false));
+
+        public Task<MdbxNativeAttachmentRecord> CreateAttachmentMetadataAsync(
+            string projectId,
+            string? entryId,
+            string fileName,
+            string? mediaType,
+            string contentHash,
+            ulong originalSize,
+            CancellationToken cancellationToken = default)
+        {
+            var attachment = new MdbxNativeAttachmentRecord(
+                $"attachment-{_nextAttachmentId++}",
+                projectId,
+                entryId,
+                fileName,
+                mediaType,
+                "metadata-only",
+                contentHash,
+                originalSize,
+                0,
+                0,
+                Deleted: false);
+            _attachments.Add(attachment);
+            return Task.FromResult(attachment);
+        }
+
+        public Task<IReadOnlyList<MdbxNativeAttachmentRecord>> ListAttachmentsByProjectAsync(string projectId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MdbxNativeAttachmentRecord>>(
+                _attachments.Where(attachment => attachment.ProjectId == projectId && !attachment.Deleted).ToList());
+
+        public Task<IReadOnlyList<MdbxNativeAttachmentRecord>> ListAttachmentsByEntryAsync(string entryId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<MdbxNativeAttachmentRecord>>(
+                _attachments.Where(attachment => attachment.EntryId == entryId && !attachment.Deleted).ToList());
+
+        public Task<MdbxNativeAttachmentRecord> WriteAttachmentInlineContentAsync(string attachmentId, byte[] content, CancellationToken cancellationToken = default)
+        {
+            var index = _attachments.FindIndex(attachment => attachment.AttachmentId == attachmentId);
+            if (index < 0)
+            {
+                throw new InvalidOperationException($"Attachment '{attachmentId}' was not found.");
+            }
+
+            _attachmentContent[attachmentId] = content.ToArray();
+            var updated = _attachments[index] with
+            {
+                StorageMode = "embedded-inline",
+                OriginalSize = (ulong)content.LongLength,
+                StoredSize = (ulong)content.LongLength,
+                ChunkCount = 1
+            };
+            _attachments[index] = updated;
+            return Task.FromResult(updated);
+        }
+
+        public Task<byte[]> ReadAttachmentContentAsync(string attachmentId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(TryReadAttachmentContent(attachmentId) ?? throw new InvalidOperationException($"Attachment '{attachmentId}' was not found."));
+
+        public Task<MdbxNativeAttachmentRecord> RenameAttachmentAsync(string attachmentId, string fileName, string? mediaType, CancellationToken cancellationToken = default)
+        {
+            var index = _attachments.FindIndex(attachment => attachment.AttachmentId == attachmentId);
+            if (index < 0)
+            {
+                throw new InvalidOperationException($"Attachment '{attachmentId}' was not found.");
+            }
+
+            var updated = _attachments[index] with
+            {
+                FileName = fileName,
+                MediaType = mediaType
+            };
+            _attachments[index] = updated;
+            return Task.FromResult(updated);
+        }
+
+        public Task DeleteAttachmentAsync(string attachmentId, CancellationToken cancellationToken = default)
+        {
+            var index = _attachments.FindIndex(attachment => attachment.AttachmentId == attachmentId);
+            if (index >= 0)
+            {
+                _attachments[index] = _attachments[index] with { Deleted = true };
+            }
+
+            _attachmentContent.Remove(attachmentId);
+            return Task.CompletedTask;
+        }
+
+        public byte[]? TryReadAttachmentContent(string attachmentId) =>
+            _attachmentContent.TryGetValue(attachmentId, out var content) ? content.ToArray() : null;
 
         private MdbxNativeEntryRecord SetDeleted(string projectId, string entryId, bool deleted)
         {

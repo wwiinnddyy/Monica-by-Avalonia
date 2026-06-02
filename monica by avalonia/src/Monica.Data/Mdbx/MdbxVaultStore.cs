@@ -15,6 +15,8 @@ public interface IMdbxVaultStore
     Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default);
     Task SoftDeleteSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
     Task RestoreSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
+    Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default);
+    Task DeleteAttachmentAsync(LocalMdbxDatabase database, Attachment attachment, CancellationToken cancellationToken = default);
 }
 
 public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultStore
@@ -187,6 +189,49 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         await vault.RestoreEntryAsync(project.ProjectId, item.MdbxFolderId!, cancellationToken);
     }
 
+    public async Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(entry.MdbxFolderId))
+        {
+            throw new InvalidOperationException("Password entry must be mirrored to MDBX before saving attachments.");
+        }
+
+        var vault = await OpenAsync(database, cancellationToken);
+        using var _ = vault;
+        var project = await EnsureDefaultProjectAsync(vault, cancellationToken);
+        var metadata = await vault.CreateAttachmentMetadataAsync(
+            project.ProjectId,
+            entry.MdbxFolderId,
+            attachment.FileName,
+            string.IsNullOrWhiteSpace(attachment.ContentType) ? null : attachment.ContentType,
+            "",
+            (ulong)Math.Max(0, content.LongLength),
+            cancellationToken);
+        var written = await vault.WriteAttachmentInlineContentAsync(metadata.AttachmentId, content, cancellationToken);
+
+        attachment.StoragePath = ToAttachmentStoragePath(written.AttachmentId);
+        attachment.SizeBytes = checked((long)Math.Min(written.OriginalSize, (ulong)long.MaxValue));
+        if (string.IsNullOrWhiteSpace(attachment.ContentType) && !string.IsNullOrWhiteSpace(written.MediaType))
+        {
+            attachment.ContentType = written.MediaType;
+        }
+
+        return attachment;
+    }
+
+    public async Task DeleteAttachmentAsync(LocalMdbxDatabase database, Attachment attachment, CancellationToken cancellationToken = default)
+    {
+        var attachmentId = TryParseAttachmentStoragePath(attachment.StoragePath);
+        if (attachmentId is null)
+        {
+            return;
+        }
+
+        var vault = await OpenAsync(database, cancellationToken);
+        using var _ = vault;
+        await vault.DeleteAttachmentAsync(attachmentId, cancellationToken);
+    }
+
     private async Task<IMdbxNativeVault> OpenAsync(LocalMdbxDatabase database, CancellationToken cancellationToken)
     {
         var path = database.WorkingCopyPath ?? database.FilePath;
@@ -229,6 +274,19 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         VaultItemType.Document => "document-ref",
         _ => "note"
     };
+
+    public static string ToAttachmentStoragePath(string attachmentId) => $"mdbx:{attachmentId}";
+
+    public static string? TryParseAttachmentStoragePath(string storagePath)
+    {
+        if (storagePath.StartsWith("mdbx:", StringComparison.OrdinalIgnoreCase))
+        {
+            var id = storagePath["mdbx:".Length..].Trim();
+            return string.IsNullOrWhiteSpace(id) ? null : id;
+        }
+
+        return null;
+    }
 
     private sealed record MdbxPayload<T>(string Kind, int SchemaVersion, T Data);
 }

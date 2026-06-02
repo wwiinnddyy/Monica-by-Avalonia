@@ -17,7 +17,9 @@ public interface IMonicaRepository
     Task<IReadOnlyList<Attachment>> GetAttachmentsAsync(string ownerType, long ownerId, CancellationToken cancellationToken = default);
     Task<IReadOnlyDictionary<long, IReadOnlyList<Attachment>>> GetAttachmentsByOwnerIdsAsync(string ownerType, IReadOnlyList<long> ownerIds, CancellationToken cancellationToken = default);
     Task<long> SaveAttachmentAsync(Attachment attachment, CancellationToken cancellationToken = default);
+    Task<long> SaveAttachmentAsync(Attachment attachment, byte[] content, CancellationToken cancellationToken = default);
     Task DeleteAttachmentAsync(long id, CancellationToken cancellationToken = default);
+    Task DeleteAttachmentAsync(long id, Attachment attachment, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PasswordHistoryEntry>> GetPasswordHistoryAsync(long entryId, CancellationToken cancellationToken = default);
     Task<long> SavePasswordHistoryAsync(PasswordHistoryEntry entry, CancellationToken cancellationToken = default);
     Task TrimPasswordHistoryAsync(long entryId, int limit, CancellationToken cancellationToken = default);
@@ -324,7 +326,10 @@ public sealed class MonicaRepository(
             .ToDictionary(group => group.Key, group => (IReadOnlyList<Attachment>)group.ToList());
     }
 
-    public async Task<long> SaveAttachmentAsync(Attachment attachment, CancellationToken cancellationToken = default)
+    public Task<long> SaveAttachmentAsync(Attachment attachment, CancellationToken cancellationToken = default) =>
+        SaveAttachmentAsync(attachment, [], cancellationToken);
+
+    public async Task<long> SaveAttachmentAsync(Attachment attachment, byte[] content, CancellationToken cancellationToken = default)
     {
         await migrator.MigrateAsync(cancellationToken);
         attachment.OwnerType = NormalizeOwnerType(attachment.OwnerType);
@@ -362,7 +367,10 @@ public sealed class MonicaRepository(
         return attachment.Id;
     }
 
-    public async Task DeleteAttachmentAsync(long id, CancellationToken cancellationToken = default)
+    public Task DeleteAttachmentAsync(long id, CancellationToken cancellationToken = default) =>
+        DeleteAttachmentAsync(id, new Attachment { Id = id }, cancellationToken);
+
+    public async Task DeleteAttachmentAsync(long id, Attachment attachment, CancellationToken cancellationToken = default)
     {
         await migrator.MigrateAsync(cancellationToken);
         await using var connection = connectionFactory.CreateConnection();

@@ -25,6 +25,17 @@ public sealed class MdbxUniffiBindingTests
             "login",
             "GitHub",
             """{"kind":"password","username":"dev","password":"secret"}""");
+        var attachment = await created.CreateAttachmentMetadataAsync(
+            project.ProjectId,
+            entry.EntryId,
+            "recovery.txt",
+            "text/plain",
+            "",
+            0);
+        var attachmentContent = "native attachment bytes"u8.ToArray();
+        var writtenAttachment = await created.WriteAttachmentInlineContentAsync(attachment.AttachmentId, attachmentContent);
+        var readAttachment = await created.ReadAttachmentContentAsync(attachment.AttachmentId);
+        await created.DeleteAttachmentAsync(attachment.AttachmentId);
         DisposeVault(created);
 
         var reopened = await bridge.OpenVaultAsync(path, password, deviceId);
@@ -35,6 +46,8 @@ public sealed class MdbxUniffiBindingTests
         Assert.Equal(deviceId, info.DeviceId);
         Assert.False(project.Deleted);
         Assert.Equal("GitHub", entry.Title);
+        Assert.Equal("embedded-inline", writtenAttachment.StorageMode);
+        Assert.Equal(attachmentContent, readAttachment);
         Assert.Equal("MDBX-1", await ReadFormatVersionAsync(path));
         var reloaded = Assert.Single(entries);
         Assert.Equal(entry.EntryId, reloaded.EntryId);

@@ -6,7 +6,7 @@ using Monica.Core.Services;
 
 namespace Monica.App.Services;
 
-public sealed record PasswordAttachmentFileDraft(string FileName, string StoragePath, long SizeBytes, string ContentType);
+public sealed record PasswordAttachmentFileDraft(string FileName, string StoragePath, long SizeBytes, string ContentType, byte[]? Content = null);
 
 public interface IPasswordAttachmentFileService
 {
@@ -39,8 +39,9 @@ public sealed class PasswordAttachmentFileService(
         await using var source = await file.OpenReadAsync();
         using var buffer = new MemoryStream();
         await source.CopyToAsync(buffer, cancellationToken);
+        var content = buffer.ToArray();
 
-        var encryptedPayload = cryptoService.EncryptString(Convert.ToBase64String(buffer.ToArray()));
+        var encryptedPayload = cryptoService.EncryptString(Convert.ToBase64String(content));
         var storageName = $"{Guid.NewGuid():N}.monicaattachment";
         var relativeStoragePath = $"{AttachmentFolderName}/{storageName}";
         var absoluteStoragePath = ResolveAttachmentPath(relativeStoragePath);
@@ -51,13 +52,19 @@ public sealed class PasswordAttachmentFileService(
             file.Name,
             relativeStoragePath,
             buffer.Length,
-            InferContentType(file.Name));
+            InferContentType(file.Name),
+            content);
     }
 
     public Task DeleteStoredAttachmentAsync(string storagePath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(storagePath))
+        {
+            return Task.CompletedTask;
+        }
+
+        if (storagePath.StartsWith("mdbx:", StringComparison.OrdinalIgnoreCase))
         {
             return Task.CompletedTask;
         }

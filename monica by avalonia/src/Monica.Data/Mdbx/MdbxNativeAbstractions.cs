@@ -20,6 +20,20 @@ public interface IMdbxNativeVault : IDisposable
     Task<MdbxNativeEntryRecord> UpdateEntryAsync(string projectId, string entryId, string entryType, string title, string payloadJson, CancellationToken cancellationToken = default);
     Task DeleteEntryAsync(string projectId, string entryId, CancellationToken cancellationToken = default);
     Task<MdbxNativeEntryRecord> RestoreEntryAsync(string projectId, string entryId, CancellationToken cancellationToken = default);
+    Task<MdbxNativeAttachmentRecord> CreateAttachmentMetadataAsync(
+        string projectId,
+        string? entryId,
+        string fileName,
+        string? mediaType,
+        string contentHash,
+        ulong originalSize,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<MdbxNativeAttachmentRecord>> ListAttachmentsByProjectAsync(string projectId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<MdbxNativeAttachmentRecord>> ListAttachmentsByEntryAsync(string entryId, CancellationToken cancellationToken = default);
+    Task<MdbxNativeAttachmentRecord> WriteAttachmentInlineContentAsync(string attachmentId, byte[] content, CancellationToken cancellationToken = default);
+    Task<byte[]> ReadAttachmentContentAsync(string attachmentId, CancellationToken cancellationToken = default);
+    Task<MdbxNativeAttachmentRecord> RenameAttachmentAsync(string attachmentId, string fileName, string? mediaType, CancellationToken cancellationToken = default);
+    Task DeleteAttachmentAsync(string attachmentId, CancellationToken cancellationToken = default);
 }
 
 public sealed record MdbxNativeVaultInfo(string VaultId, string DeviceId);
@@ -35,4 +49,17 @@ public sealed record MdbxNativeEntryRecord(
     string EntryType,
     string Title,
     string PayloadJson,
+    bool Deleted);
+
+public sealed record MdbxNativeAttachmentRecord(
+    string AttachmentId,
+    string ProjectId,
+    string? EntryId,
+    string FileName,
+    string? MediaType,
+    string StorageMode,
+    string ContentHash,
+    ulong OriginalSize,
+    ulong StoredSize,
+    uint ChunkCount,
     bool Deleted);

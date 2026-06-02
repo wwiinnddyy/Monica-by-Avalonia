@@ -2476,6 +2476,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         string storagePath,
         long sizeBytes = 0,
         string contentType = "",
+        byte[]? content = null,
         CancellationToken cancellationToken = default)
     {
         if (entry.Id == 0)
@@ -2495,7 +2496,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
             BitwardenVaultId = entry.BitwardenVaultId
         };
 
-        var id = await _repository.SaveAttachmentAsync(attachment, cancellationToken);
+        var originalStoragePath = attachment.StoragePath;
+        var id = content is null
+            ? await _repository.SaveAttachmentAsync(attachment, cancellationToken)
+            : await _repository.SaveAttachmentAsync(attachment, content, cancellationToken);
+        if (content is not null &&
+            !string.Equals(originalStoragePath, attachment.StoragePath, StringComparison.Ordinal) &&
+            !originalStoragePath.StartsWith("mdbx:", StringComparison.OrdinalIgnoreCase))
+        {
+            await _passwordAttachmentFileService.DeleteStoredAttachmentAsync(originalStoragePath, cancellationToken);
+        }
+
         SetPasswordAttachments(entry.Id, [.. GetPasswordAttachments(entry.Id), attachment]);
         RefreshPasswordAttachmentState(entry);
         OnPropertyChanged(nameof(FilteredPasswords));
@@ -2526,12 +2537,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await AddPasswordAttachmentMetadataAsync(entry, draft.FileName, draft.StoragePath, draft.SizeBytes, draft.ContentType);
+        await AddPasswordAttachmentMetadataAsync(entry, draft.FileName, draft.StoragePath, draft.SizeBytes, draft.ContentType, draft.Content);
     }
 
     private async Task DeletePasswordAttachmentAsync(Attachment attachment)
     {
-        await _repository.DeleteAttachmentAsync(attachment.Id);
+        await _repository.DeleteAttachmentAsync(attachment.Id, attachment);
         await _passwordAttachmentFileService.DeleteStoredAttachmentAsync(attachment.StoragePath);
         var remaining = GetPasswordAttachments(attachment.OwnerId)
             .Where(item => item.Id != attachment.Id)

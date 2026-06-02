@@ -99,8 +99,43 @@ public sealed class MdbxBackedMonicaRepository(
     public Task<long> SaveAttachmentAsync(Attachment attachment, CancellationToken cancellationToken = default) =>
         inner.SaveAttachmentAsync(attachment, cancellationToken);
 
+    public async Task<long> SaveAttachmentAsync(Attachment attachment, byte[] content, CancellationToken cancellationToken = default)
+    {
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is not null &&
+            content.Length > 0 &&
+            string.Equals(attachment.OwnerType, "PASSWORD", StringComparison.OrdinalIgnoreCase))
+        {
+            var entry = (await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken))
+                .FirstOrDefault(item => item.Id == attachment.OwnerId);
+            if (entry is not null)
+            {
+                if (IsUnboundFromMdbx(entry))
+                {
+                    await mdbxVaultStore.SavePasswordAsync(database, entry, cancellationToken);
+                    await inner.SavePasswordAsync(entry, cancellationToken);
+                }
+
+                await mdbxVaultStore.SavePasswordAttachmentAsync(database, entry, attachment, content, cancellationToken);
+            }
+        }
+
+        return await inner.SaveAttachmentAsync(attachment, cancellationToken);
+    }
+
     public Task DeleteAttachmentAsync(long id, CancellationToken cancellationToken = default) =>
         inner.DeleteAttachmentAsync(id, cancellationToken);
+
+    public async Task DeleteAttachmentAsync(long id, Attachment attachment, CancellationToken cancellationToken = default)
+    {
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is not null)
+        {
+            await mdbxVaultStore.DeleteAttachmentAsync(database, attachment, cancellationToken);
+        }
+
+        await inner.DeleteAttachmentAsync(id, attachment, cancellationToken);
+    }
 
     public Task<IReadOnlyList<PasswordHistoryEntry>> GetPasswordHistoryAsync(long entryId, CancellationToken cancellationToken = default) =>
         inner.GetPasswordHistoryAsync(entryId, cancellationToken);

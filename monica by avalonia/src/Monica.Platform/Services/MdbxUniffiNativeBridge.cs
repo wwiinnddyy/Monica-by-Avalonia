@@ -96,6 +96,64 @@ public sealed class MdbxUniffiNativeBridge : IMdbxNativeBridge
             return Task.FromResult(ToEntry(entry));
         }
 
+        public Task<MdbxNativeAttachmentRecord> CreateAttachmentMetadataAsync(
+            string projectId,
+            string? entryId,
+            string fileName,
+            string? mediaType,
+            string contentHash,
+            ulong originalSize,
+            CancellationToken cancellationToken = default)
+        {
+            var attachment = Invoke(
+                vault.GetType(),
+                vault,
+                ["CreateAttachmentMetadata", "create_attachment_metadata"],
+                projectId,
+                entryId,
+                fileName,
+                mediaType,
+                contentHash,
+                originalSize);
+            return Task.FromResult(ToAttachment(attachment));
+        }
+
+        public Task<IReadOnlyList<MdbxNativeAttachmentRecord>> ListAttachmentsByProjectAsync(string projectId, CancellationToken cancellationToken = default)
+        {
+            var attachments = Invoke(vault.GetType(), vault, ["ListAttachmentsByProject", "list_attachments_by_project"], projectId);
+            return Task.FromResult<IReadOnlyList<MdbxNativeAttachmentRecord>>(AsEnumerable(attachments).Select(ToAttachment).ToList());
+        }
+
+        public Task<IReadOnlyList<MdbxNativeAttachmentRecord>> ListAttachmentsByEntryAsync(string entryId, CancellationToken cancellationToken = default)
+        {
+            var attachments = Invoke(vault.GetType(), vault, ["ListAttachmentsByEntry", "list_attachments_by_entry"], entryId);
+            return Task.FromResult<IReadOnlyList<MdbxNativeAttachmentRecord>>(AsEnumerable(attachments).Select(ToAttachment).ToList());
+        }
+
+        public Task<MdbxNativeAttachmentRecord> WriteAttachmentInlineContentAsync(string attachmentId, byte[] content, CancellationToken cancellationToken = default)
+        {
+            var attachment = Invoke(vault.GetType(), vault, ["WriteAttachmentInlineContent", "write_attachment_inline_content"], attachmentId, content);
+            return Task.FromResult(ToAttachment(attachment));
+        }
+
+        public Task<byte[]> ReadAttachmentContentAsync(string attachmentId, CancellationToken cancellationToken = default)
+        {
+            var content = Invoke(vault.GetType(), vault, ["ReadAttachmentContent", "read_attachment_content"], attachmentId);
+            return Task.FromResult((byte[])content);
+        }
+
+        public Task<MdbxNativeAttachmentRecord> RenameAttachmentAsync(string attachmentId, string fileName, string? mediaType, CancellationToken cancellationToken = default)
+        {
+            var attachment = Invoke(vault.GetType(), vault, ["RenameAttachment", "rename_attachment"], attachmentId, fileName, mediaType);
+            return Task.FromResult(ToAttachment(attachment));
+        }
+
+        public Task DeleteAttachmentAsync(string attachmentId, CancellationToken cancellationToken = default)
+        {
+            Invoke(vault.GetType(), vault, ["DeleteAttachment", "delete_attachment"], attachmentId);
+            return Task.CompletedTask;
+        }
+
         public void Dispose()
         {
             if (vault is IDisposable disposable)
@@ -118,6 +176,19 @@ public sealed class MdbxUniffiNativeBridge : IMdbxNativeBridge
         GetString(entry, "PayloadJson", "payloadJson", "payload_json"),
         GetBool(entry, "Deleted", "deleted"));
 
+    private static MdbxNativeAttachmentRecord ToAttachment(object attachment) => new(
+        GetString(attachment, "AttachmentId", "attachmentId", "attachment_id"),
+        GetString(attachment, "ProjectId", "projectId", "project_id"),
+        GetNullableString(attachment, "EntryId", "entryId", "entry_id"),
+        GetString(attachment, "FileName", "fileName", "file_name"),
+        GetNullableString(attachment, "MediaType", "mediaType", "media_type"),
+        GetString(attachment, "StorageMode", "storageMode", "storage_mode"),
+        GetString(attachment, "ContentHash", "contentHash", "content_hash"),
+        GetUInt64(attachment, "OriginalSize", "originalSize", "original_size"),
+        GetUInt64(attachment, "StoredSize", "storedSize", "stored_size"),
+        GetUInt32(attachment, "ChunkCount", "chunkCount", "chunk_count"),
+        GetBool(attachment, "Deleted", "deleted"));
+
     private static object Invoke(Type type, object? target, IReadOnlyList<string> methodNames, params object?[] args)
     {
         foreach (var name in methodNames)
@@ -129,8 +200,10 @@ public sealed class MdbxUniffiNativeBridge : IMdbxNativeBridge
                 continue;
             }
 
-            return method.Invoke(target, args)
-                ?? throw new InvalidOperationException($"MDBX UniFFI method '{name}' returned null.");
+            var result = method.Invoke(target, args);
+            return method.ReturnType == typeof(void)
+                ? DBNull.Value
+                : result ?? throw new InvalidOperationException($"MDBX UniFFI method '{name}' returned null.");
         }
 
         throw new MissingMethodException(type.FullName, string.Join("/", methodNames));
@@ -155,8 +228,19 @@ public sealed class MdbxUniffiNativeBridge : IMdbxNativeBridge
     private static string GetString(object source, params string[] names) =>
         Convert.ToString(GetValue(source, names), System.Globalization.CultureInfo.InvariantCulture) ?? "";
 
+    private static string? GetNullableString(object source, params string[] names) =>
+        GetValue(source, names) is { } value
+            ? Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+
     private static bool GetBool(object source, params string[] names) =>
         Convert.ToBoolean(GetValue(source, names), System.Globalization.CultureInfo.InvariantCulture);
+
+    private static ulong GetUInt64(object source, params string[] names) =>
+        Convert.ToUInt64(GetValue(source, names), System.Globalization.CultureInfo.InvariantCulture);
+
+    private static uint GetUInt32(object source, params string[] names) =>
+        Convert.ToUInt32(GetValue(source, names), System.Globalization.CultureInfo.InvariantCulture);
 
     private static object? GetValue(object source, IReadOnlyList<string> names)
     {
