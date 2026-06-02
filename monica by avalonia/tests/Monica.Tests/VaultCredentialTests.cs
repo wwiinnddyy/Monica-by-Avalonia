@@ -29,6 +29,33 @@ public sealed class VaultCredentialTests
     }
 
     [Fact]
+    public async Task Existing_database_can_be_written_after_legacy_readonly_detection()
+    {
+        var path = GetTempDatabasePath();
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE bootstrap_probe (id INTEGER PRIMARY KEY);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var factory = new SqliteConnectionFactory(path);
+        var detection = await new LegacyVaultDetector(factory).DetectAsync();
+
+        Assert.False(detection.RequiresImport);
+
+        var store = new VaultCredentialStore(factory, new DatabaseMigrator(factory));
+        var crypto = new CryptoService();
+        await store.SaveAsync(crypto.HashMasterPassword("correct password"));
+
+        var loaded = await store.GetAsync();
+
+        Assert.NotNull(loaded);
+        Assert.True(new CryptoService().VerifyMasterPassword("correct password", loaded));
+    }
+
+    [Fact]
     public async Task ViewModel_requires_first_run_password_confirmation()
     {
         var viewModel = CreateViewModel(GetTempDatabasePath());

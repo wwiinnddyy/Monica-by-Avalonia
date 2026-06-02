@@ -146,6 +146,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [
         new("Notes CSV", ["*.csv"])
     ];
+    private static readonly PlatformFilePickerFileType[] WalletCsvFileTypes =
+    [
+        new("Cards and Documents CSV", ["*.csv"])
+    ];
     private static readonly PlatformFilePickerFileType[] AegisJsonFileTypes =
     [
         new("Aegis JSON", ["*.json"])
@@ -216,6 +220,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly IMasterPasswordMaintenanceService _masterPasswordMaintenanceService;
     private readonly IVaultCredentialStore _credentialStore;
     private readonly ILegacyVaultDetector _legacyVaultDetector;
+    private readonly IVaultUnlockCoordinator _vaultUnlockCoordinator;
     private readonly IAppSettingsService _settingsService;
     private readonly ILocalizationService _localization;
     private readonly IReadOnlyList<PlatformCapability> _sourceCapabilities;
@@ -254,6 +259,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ITotpEditorDialogService? totpEditorDialogService = null,
         IWalletItemEditorDialogService? walletItemEditorDialogService = null,
         IMasterPasswordMaintenanceService? masterPasswordMaintenanceService = null,
+        IVaultUnlockCoordinator? vaultUnlockCoordinator = null,
         IExternalLinkService? externalLinkService = null,
         IFileSystemPickerService? fileSystemPickerService = null)
     {
@@ -275,6 +281,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _walletItemEditorDialogService = walletItemEditorDialogService ?? new DisabledWalletItemEditorDialogService();
         _masterPasswordMaintenanceService = masterPasswordMaintenanceService ?? new DisabledMasterPasswordMaintenanceService();
         _legacyVaultDetector = legacyVaultDetector ?? new NoLegacyVaultDetector();
+        _vaultUnlockCoordinator = vaultUnlockCoordinator ?? new VaultUnlockCoordinator(_credentialStore, _cryptoService, _legacyVaultDetector);
         _settingsService = settingsService;
         _localization = localization;
         _localization.PropertyChanged += (_, _) => RefreshLocalizedProperties();
@@ -449,6 +456,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private string _exportNoteCsvPreview = "";
+
+    [ObservableProperty]
+    private string _exportWalletCsvPreview = "";
 
     [ObservableProperty]
     private string _exportAegisPreview = "";
@@ -1018,7 +1028,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             await _settingsService.LoadAsync();
             ApplySettings(_settingsService.Current);
-            _legacyVaultDetection = await _legacyVaultDetector.DetectAsync();
+            var initialization = await _vaultUnlockCoordinator.InitializeAsync();
+            _legacyVaultDetection = initialization.LegacyVaultDetection;
             RaiseLegacyVaultImportPrompt();
             if (_legacyVaultDetection.RequiresImport)
             {
@@ -1027,7 +1038,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            IsVaultInitialized = await _credentialStore.GetAsync() is not null;
+            IsVaultInitialized = initialization.IsVaultInitialized;
             StatusMessage = IsVaultInitialized
                 ? _localization.Get("VaultLocked")
                 : _localization.Get("FirstRunCreateMasterPassword");
@@ -1041,58 +1052,45 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task UnlockAsync()
     {
-        try
+        var result = await _vaultUnlockCoordinator.UnlockOrCreateAsync(
+            MasterPassword,
+            ConfirmMasterPassword,
+            _legacyVaultDetection);
+
+        switch (result.Status)
         {
-            if (string.IsNullOrWhiteSpace(MasterPassword))
-            {
-                StatusMessage = _localization.Get("EnterMasterPassword");
+            case VaultUnlockStatus.MissingPassword:
+            case VaultUnlockStatus.LegacyImportRequired:
+            case VaultUnlockStatus.PasswordTooShort:
+            case VaultUnlockStatus.ConfirmationMismatch:
+                IsVaultInitialized = result.IsVaultInitialized;
+                StatusMessage = _localization.Get(result.MessageKey);
                 return;
-            }
-
-            if (_legacyVaultDetection.RequiresImport)
-            {
-                StatusMessage = _localization.Get("LegacyVaultImportRequired");
-                return;
-            }
-
-            var storedHash = await _credentialStore.GetAsync();
-            if (storedHash is null)
-            {
-                if (MasterPassword.Length < 8)
-                {
-                    StatusMessage = _localization.Get("MasterPasswordMinLength");
-                    return;
-                }
-
-                if (!string.Equals(MasterPassword, ConfirmMasterPassword, StringComparison.Ordinal))
-                {
-                    StatusMessage = _localization.Get("ConfirmationMismatch");
-                    return;
-                }
-
-                storedHash = _cryptoService.HashMasterPassword(MasterPassword);
-                await _credentialStore.SaveAsync(storedHash);
-                IsVaultInitialized = true;
-            }
-
-            if (!_cryptoService.VerifyMasterPassword(MasterPassword, storedHash))
-            {
-                StatusMessage = _localization.Get("WrongMasterPassword");
+            case VaultUnlockStatus.WrongPassword:
+                IsVaultInitialized = result.IsVaultInitialized;
+                IsUnlocked = false;
+                StatusMessage = _localization.Get(result.MessageKey);
                 MasterPassword = "";
                 ConfirmMasterPassword = "";
                 return;
-            }
-
-            IsUnlocked = true;
-            MasterPassword = "";
-            ConfirmMasterPassword = "";
-            StatusMessage = _localization.Get("VaultUnlocked");
-            await LoadAsync();
-        }
-        catch (Exception ex)
-        {
-            IsUnlocked = false;
-            StatusMessage = _localization.Format("UnlockFailedFormat", ex.Message);
+            case VaultUnlockStatus.Failed:
+                IsVaultInitialized = result.IsVaultInitialized;
+                IsUnlocked = false;
+                StatusMessage = _localization.Format(result.MessageKey, result.Error?.Message ?? "");
+                return;
+            case VaultUnlockStatus.CreatedAndUnlocked:
+            case VaultUnlockStatus.Unlocked:
+                IsVaultInitialized = result.IsVaultInitialized;
+                IsUnlocked = true;
+                MasterPassword = "";
+                ConfirmMasterPassword = "";
+                StatusMessage = _localization.Get(result.MessageKey);
+                await LoadAsync();
+                return;
+            default:
+                IsUnlocked = false;
+                StatusMessage = _localization.Format("UnlockFailedFormat", result.Status.ToString());
+                return;
         }
     }
 
@@ -2659,6 +2657,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ExportWalletCsv()
+    {
+        ExportWalletCsvPreview = BuildWalletCsvExport();
+        StatusMessage = _localization.Get("ExportedWalletCsv");
+    }
+
+    [RelayCommand]
     private void ExportAegisJson()
     {
         ExportAegisPreview = BuildAegisJsonExport();
@@ -2823,6 +2828,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
             $"monica_notes_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.csv",
             ExportNoteCsvPreview,
             NoteCsvFileTypes);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
+    private async Task SaveWalletCsvExportAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ExportWalletCsvPreview))
+        {
+            ExportWalletCsv();
+        }
+
+        await SaveExportTextAsync(
+            _localization.Get("ExportWalletCsv"),
+            $"monica_cards_documents_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.csv",
+            ExportWalletCsvPreview,
+            WalletCsvFileTypes);
     }
 
     [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
@@ -3089,6 +3109,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
             .ToArray();
 
         return _importExportService.ExportNoteCsv(exportNotes);
+    }
+
+    private string BuildWalletCsvExport()
+    {
+        var exportWalletItems = WalletItems
+            .Select(item => CloneSecureItemForExport(item))
+            .ToArray();
+
+        return _importExportService.ExportWalletCsv(exportWalletItems);
     }
 
     private string BuildAegisJsonExport()
@@ -5485,6 +5514,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SavePasswordCsvExportCommand.NotifyCanExecuteChanged();
         SaveTotpCsvExportCommand.NotifyCanExecuteChanged();
         SaveNoteCsvExportCommand.NotifyCanExecuteChanged();
+        SaveWalletCsvExportCommand.NotifyCanExecuteChanged();
         SaveAegisJsonExportCommand.NotifyCanExecuteChanged();
     }
 

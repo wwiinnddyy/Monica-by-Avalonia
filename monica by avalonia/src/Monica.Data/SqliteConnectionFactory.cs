@@ -33,7 +33,6 @@ public sealed class SqliteConnectionFactory : ISqliteConnectionFactory
         {
             DataSource = DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
             ForeignKeys = true
         };
 

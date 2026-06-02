@@ -95,6 +95,7 @@ public partial class App : Application
             _.GetRequiredService<ILocalizationService>()));
         services.AddSingleton<IAppSettingsService, AppSettingsService>();
         services.AddSingleton<ILocalizationService, LocalizationService>();
+        services.AddSingleton<IVaultUnlockCoordinator, VaultUnlockCoordinator>();
         services.AddSingleton<MainWindowViewModel>();
         return services.BuildServiceProvider();
     }

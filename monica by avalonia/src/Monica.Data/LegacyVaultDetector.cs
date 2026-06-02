@@ -64,8 +64,7 @@ public sealed class LegacyVaultDetector(ISqliteConnectionFactory connectionFacto
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Shared
+            Mode = SqliteOpenMode.ReadOnly
         };
 
         return new SqliteConnection(builder.ToString());

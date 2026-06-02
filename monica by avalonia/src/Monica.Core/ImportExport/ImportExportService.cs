@@ -15,6 +15,7 @@ public interface IImportExportService
     string ExportPasswordCsv(IEnumerable<PasswordEntry> passwords);
     string ExportTotpCsv(IEnumerable<SecureItem> secureItems);
     string ExportNoteCsv(IEnumerable<SecureItem> secureItems);
+    string ExportWalletCsv(IEnumerable<SecureItem> secureItems);
     string ExportAegisJson(IEnumerable<SecureItem> secureItems);
     IReadOnlyList<SecureItem> ImportTotpCsv(string csv);
     IReadOnlyList<SecureItem> ImportNoteCsv(string csv);
@@ -182,6 +183,36 @@ public sealed class ImportExportService : IImportExportService
             csv.WriteField(payload.NotesCache);
             csv.WriteField(item.IsFavorite.ToString());
             csv.WriteField(payload.ImagePaths);
+            csv.WriteField(item.CreatedAt.ToUnixTimeMilliseconds());
+            csv.WriteField(item.UpdatedAt.ToUnixTimeMilliseconds());
+            csv.NextRecord();
+        }
+
+        return writer.ToString();
+    }
+
+    public string ExportWalletCsv(IEnumerable<SecureItem> secureItems)
+    {
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        using var csv = new CsvWriter(writer, CreateCsvConfiguration());
+
+        foreach (var header in SecureItemCsvHeaders)
+        {
+            csv.WriteField(header);
+        }
+
+        csv.NextRecord();
+
+        foreach (var item in secureItems.Where(item => item.ItemType is VaultItemType.BankCard or VaultItemType.Document))
+        {
+            var (type, data, imagePaths) = CreateWalletCsvPayload(item);
+            csv.WriteField(item.Id);
+            csv.WriteField(type);
+            csv.WriteField(item.Title);
+            csv.WriteField(data);
+            csv.WriteField(item.Notes);
+            csv.WriteField(item.IsFavorite.ToString());
+            csv.WriteField(imagePaths);
             csv.WriteField(item.CreatedAt.ToUnixTimeMilliseconds());
             csv.WriteField(item.UpdatedAt.ToUnixTimeMilliseconds());
             csv.NextRecord();
@@ -549,6 +580,22 @@ public sealed class ImportExportService : IImportExportService
         element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result)
             ? result
             : null;
+
+    private static (string Type, string Data, string ImagePaths) CreateWalletCsvPayload(SecureItem item)
+    {
+        if (item.ItemType == VaultItemType.BankCard)
+        {
+            var data = WalletItemDataCodec.DecodeBankCard(item);
+            var imagePaths = WalletItemDataCodec.EncodeImagePaths(data.ImagePaths);
+            data.ImagePaths.Clear();
+            return ("BANK_CARD", WalletItemDataCodec.EncodeBankCard(data), imagePaths);
+        }
+
+        var document = WalletItemDataCodec.DecodeDocument(item);
+        var documentImagePaths = WalletItemDataCodec.EncodeImagePaths(document.ImagePaths);
+        document.ImagePaths.Clear();
+        return ("DOCUMENT", WalletItemDataCodec.EncodeDocument(document), documentImagePaths);
+    }
 }
 
 internal sealed record MonicaExportDtoPackage(
