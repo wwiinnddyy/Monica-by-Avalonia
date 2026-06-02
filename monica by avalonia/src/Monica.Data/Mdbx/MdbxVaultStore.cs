@@ -14,12 +14,15 @@ public interface IMdbxVaultStore
     Task<IReadOnlyList<PasswordEntry>> GetPasswordsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, bool includeDeleted = false, bool includeArchived = false, CancellationToken cancellationToken = default);
     Task SoftDeletePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default);
     Task RestorePasswordAsync(LocalMdbxDatabase database, PasswordEntry entry, CancellationToken cancellationToken = default);
+    Task SoftDeletePasswordEntriesAsync(LocalMdbxDatabase database, CancellationToken cancellationToken = default);
     Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
     Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, IReadOnlyDictionary<long, Category> categories, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecureItem>> GetSecureItemsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, VaultItemType? itemType = null, bool includeDeleted = false, CancellationToken cancellationToken = default);
     Task SoftDeleteSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
     Task RestoreSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
+    Task SoftDeleteSecureItemEntriesAsync(LocalMdbxDatabase database, CancellationToken cancellationToken = default);
+    Task DetachSecureItemsFromPasswordsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, CancellationToken cancellationToken = default);
     Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default);
     Task DeleteAttachmentAsync(LocalMdbxDatabase database, Attachment attachment, CancellationToken cancellationToken = default);
 }
@@ -124,7 +127,7 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
         var record = await FindEntryAsync(vault, entry.MdbxFolderId!, PasswordEntryTypes, includeDeleted: true, cancellationToken);
-        if (record is not null)
+        if (record is not null && !record.Deleted)
         {
             await vault.DeleteEntryAsync(record.ProjectId, entry.MdbxFolderId!, cancellationToken);
         }
@@ -145,6 +148,9 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
             await vault.RestoreEntryAsync(record.ProjectId, entry.MdbxFolderId!, cancellationToken);
         }
     }
+
+    public Task SoftDeletePasswordEntriesAsync(LocalMdbxDatabase database, CancellationToken cancellationToken = default) =>
+        SoftDeleteEntriesByTypesAsync(database, PasswordEntryTypes, deleteAttachments: true, cancellationToken);
 
     public Task<SecureItem> SaveSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default) =>
         SaveSecureItemAsync(database, item, new Dictionary<long, Category>(), cancellationToken);
@@ -222,7 +228,7 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
         var record = await FindEntryAsync(vault, item.MdbxFolderId!, SecureEntryTypes, includeDeleted: true, cancellationToken);
-        if (record is not null)
+        if (record is not null && !record.Deleted)
         {
             await vault.DeleteEntryAsync(record.ProjectId, item.MdbxFolderId!, cancellationToken);
         }
@@ -241,6 +247,20 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         if (record is not null)
         {
             await vault.RestoreEntryAsync(record.ProjectId, item.MdbxFolderId!, cancellationToken);
+        }
+    }
+
+    public Task SoftDeleteSecureItemEntriesAsync(LocalMdbxDatabase database, CancellationToken cancellationToken = default) =>
+        SoftDeleteEntriesByTypesAsync(database, SecureEntryTypes, deleteAttachments: true, cancellationToken);
+
+    public async Task DetachSecureItemsFromPasswordsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, CancellationToken cancellationToken = default)
+    {
+        var items = await GetSecureItemsAsync(database, categories, itemType: null, includeDeleted: false, cancellationToken);
+        var categoryById = categories.ToDictionary(category => category.Id);
+        foreach (var item in items.Where(item => item.BoundPasswordId is not null))
+        {
+            item.BoundPasswordId = null;
+            await SaveSecureItemAsync(database, item, categoryById, cancellationToken);
         }
     }
 
@@ -288,6 +308,37 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         var vault = await OpenAsync(database, cancellationToken);
         using var _ = vault;
         await vault.DeleteAttachmentAsync(attachmentId, cancellationToken);
+    }
+
+    private async Task SoftDeleteEntriesByTypesAsync(
+        LocalMdbxDatabase database,
+        IReadOnlyList<string> entryTypes,
+        bool deleteAttachments,
+        CancellationToken cancellationToken)
+    {
+        var vault = await OpenAsync(database, cancellationToken);
+        using var _ = vault;
+        var projects = await vault.ListProjectsAsync(false, cancellationToken);
+        foreach (var project in projects)
+        {
+            foreach (var entryType in entryTypes)
+            {
+                var records = await vault.ListEntriesAsync(project.ProjectId, entryType, cancellationToken);
+                foreach (var record in records)
+                {
+                    if (deleteAttachments)
+                    {
+                        var attachments = await vault.ListAttachmentsByEntryAsync(record.EntryId, cancellationToken);
+                        foreach (var attachment in attachments)
+                        {
+                            await vault.DeleteAttachmentAsync(attachment.AttachmentId, cancellationToken);
+                        }
+                    }
+
+                    await vault.DeleteEntryAsync(project.ProjectId, record.EntryId, cancellationToken);
+                }
+            }
+        }
     }
 
     private async Task<IMdbxNativeVault> OpenAsync(LocalMdbxDatabase database, CancellationToken cancellationToken)

@@ -20,7 +20,10 @@ public sealed class MdbxBackedMonicaRepository(
         var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
         var categoryById = categories.ToDictionary(category => category.Id);
         await MirrorUnboundPasswordsAsync(database, categoryById, cancellationToken);
-        return await mdbxVaultStore.GetPasswordsAsync(database, categories, includeDeleted, includeArchived, cancellationToken);
+        var entries = await mdbxVaultStore.GetPasswordsAsync(database, categories, includeDeleted, includeArchived, cancellationToken);
+        return includeDeleted
+            ? await FilterDeletedPasswordsBySqliteTombstonesAsync(entries, cancellationToken)
+            : entries;
     }
 
     public async Task<long> SavePasswordAsync(PasswordEntry entry, CancellationToken cancellationToken = default)
@@ -80,8 +83,31 @@ public sealed class MdbxBackedMonicaRepository(
         await inner.RestorePasswordAsync(id, cancellationToken);
     }
 
-    public Task DeletePasswordPermanentlyAsync(long id, CancellationToken cancellationToken = default) =>
-        inner.DeletePasswordPermanentlyAsync(id, cancellationToken);
+    public async Task DeletePasswordPermanentlyAsync(long id, CancellationToken cancellationToken = default)
+    {
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is not null)
+        {
+            var entry = (await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken))
+                .FirstOrDefault(item => item.Id == id);
+            if (entry is not null)
+            {
+                foreach (var attachment in await inner.GetAttachmentsAsync("PASSWORD", id, cancellationToken))
+                {
+                    await mdbxVaultStore.DeleteAttachmentAsync(database, attachment, cancellationToken);
+                }
+
+                await mdbxVaultStore.SoftDeletePasswordAsync(database, entry, cancellationToken);
+                var boundTotps = await inner.GetSecureItemsByBoundPasswordIdAsync(id, includeDeleted: true, cancellationToken);
+                foreach (var item in boundTotps)
+                {
+                    await mdbxVaultStore.SoftDeleteSecureItemAsync(database, item, cancellationToken);
+                }
+            }
+        }
+
+        await inner.DeletePasswordPermanentlyAsync(id, cancellationToken);
+    }
 
     public Task<IReadOnlyList<CustomField>> GetCustomFieldsAsync(long entryId, CancellationToken cancellationToken = default) =>
         inner.GetCustomFieldsAsync(entryId, cancellationToken);
@@ -192,7 +218,10 @@ public sealed class MdbxBackedMonicaRepository(
         var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
         var categoryById = categories.ToDictionary(category => category.Id);
         await MirrorUnboundSecureItemsAsync(database, categoryById, cancellationToken);
-        return await mdbxVaultStore.GetSecureItemsAsync(database, categories, itemType, includeDeleted, cancellationToken);
+        var items = await mdbxVaultStore.GetSecureItemsAsync(database, categories, itemType, includeDeleted, cancellationToken);
+        return includeDeleted
+            ? await FilterDeletedSecureItemsBySqliteTombstonesAsync(items, cancellationToken)
+            : items;
     }
 
     public async Task<IReadOnlyList<SecureItem>> GetSecureItemsByBoundPasswordIdAsync(long passwordId, bool includeDeleted = false, CancellationToken cancellationToken = default)
@@ -207,6 +236,11 @@ public sealed class MdbxBackedMonicaRepository(
         var categoryById = categories.ToDictionary(category => category.Id);
         await MirrorUnboundSecureItemsAsync(database, categoryById, cancellationToken);
         var items = await mdbxVaultStore.GetSecureItemsAsync(database, categories, VaultItemType.Totp, includeDeleted, cancellationToken);
+        if (includeDeleted)
+        {
+            items = await FilterDeletedSecureItemsBySqliteTombstonesAsync(items, cancellationToken);
+        }
+
         return items.Where(item => item.BoundPasswordId == passwordId).ToList();
     }
 
@@ -302,8 +336,30 @@ public sealed class MdbxBackedMonicaRepository(
     public Task LogAsync(OperationLog log, CancellationToken cancellationToken = default) =>
         inner.LogAsync(log, cancellationToken);
 
-    public Task ClearVaultDataAsync(VaultClearScope scope, CancellationToken cancellationToken = default) =>
-        inner.ClearVaultDataAsync(scope, cancellationToken);
+    public async Task ClearVaultDataAsync(VaultClearScope scope, CancellationToken cancellationToken = default)
+    {
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is not null)
+        {
+            var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
+            switch (scope)
+            {
+                case VaultClearScope.Passwords:
+                    await mdbxVaultStore.DetachSecureItemsFromPasswordsAsync(database, categories, cancellationToken);
+                    await mdbxVaultStore.SoftDeletePasswordEntriesAsync(database, cancellationToken);
+                    break;
+                case VaultClearScope.SecureItems:
+                    await mdbxVaultStore.SoftDeleteSecureItemEntriesAsync(database, cancellationToken);
+                    break;
+                default:
+                    await mdbxVaultStore.SoftDeletePasswordEntriesAsync(database, cancellationToken);
+                    await mdbxVaultStore.SoftDeleteSecureItemEntriesAsync(database, cancellationToken);
+                    break;
+            }
+        }
+
+        await inner.ClearVaultDataAsync(scope, cancellationToken);
+    }
 
     private async Task<LocalMdbxDatabase?> GetDefaultLocalMdbxDatabaseAsync(CancellationToken cancellationToken)
     {
@@ -350,6 +406,25 @@ public sealed class MdbxBackedMonicaRepository(
         }
     }
 
+    private async Task<IReadOnlyList<PasswordEntry>> FilterDeletedPasswordsBySqliteTombstonesAsync(
+        IReadOnlyList<PasswordEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        if (!entries.Any(entry => entry.IsDeleted))
+        {
+            return entries;
+        }
+
+        var deletedMdbxEntryIds = (await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken))
+            .Where(entry => entry.IsDeleted)
+            .Select(entry => entry.MdbxFolderId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return entries
+            .Where(entry => !entry.IsDeleted || (!string.IsNullOrWhiteSpace(entry.MdbxFolderId) && deletedMdbxEntryIds.Contains(entry.MdbxFolderId)))
+            .ToList();
+    }
+
     private async Task MirrorUnboundSecureItemsAsync(LocalMdbxDatabase database, IReadOnlyDictionary<long, Category> categories, CancellationToken cancellationToken)
     {
         var sqliteItems = await inner.GetSecureItemsAsync(includeDeleted: true, cancellationToken: cancellationToken);
@@ -363,6 +438,25 @@ public sealed class MdbxBackedMonicaRepository(
 
             await inner.SaveSecureItemAsync(item, cancellationToken);
         }
+    }
+
+    private async Task<IReadOnlyList<SecureItem>> FilterDeletedSecureItemsBySqliteTombstonesAsync(
+        IReadOnlyList<SecureItem> items,
+        CancellationToken cancellationToken)
+    {
+        if (!items.Any(item => item.IsDeleted))
+        {
+            return items;
+        }
+
+        var deletedMdbxEntryIds = (await inner.GetSecureItemsAsync(includeDeleted: true, cancellationToken: cancellationToken))
+            .Where(item => item.IsDeleted)
+            .Select(item => item.MdbxFolderId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return items
+            .Where(item => !item.IsDeleted || (!string.IsNullOrWhiteSpace(item.MdbxFolderId) && deletedMdbxEntryIds.Contains(item.MdbxFolderId)))
+            .ToList();
     }
 
     private async Task<IReadOnlyList<Attachment>> MigratePasswordAttachmentsAsync(

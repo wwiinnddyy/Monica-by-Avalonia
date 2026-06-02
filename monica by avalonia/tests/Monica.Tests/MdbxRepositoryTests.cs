@@ -287,6 +287,97 @@ public sealed class MdbxRepositoryTests
         Assert.Null(contentStore.TryRead(attachment.StoragePath));
     }
 
+    [Fact]
+    public async Task Repository_clears_password_scope_from_mdbx_without_rehydrating_entries()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Portal",
+            Username = "dev",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var boundNote = new SecureItem
+        {
+            ItemType = VaultItemType.Note,
+            Title = "Recovery",
+            Notes = "keep this note",
+            BoundPasswordId = password.Id
+        };
+        await repository.SaveSecureItemAsync(boundNote);
+
+        await repository.ClearVaultDataAsync(VaultClearScope.Passwords);
+
+        Assert.Empty(await repository.GetPasswordsAsync());
+        Assert.Empty(await repository.GetPasswordsAsync(includeDeleted: true, includeArchived: true));
+        var remaining = Assert.Single(await repository.GetSecureItemsAsync(VaultItemType.Note));
+        Assert.Null(remaining.BoundPasswordId);
+        Assert.Equal(1, bridge.CountActiveEntries(database.WorkingCopyPath!));
+        Assert.Equal(1, bridge.CountDeletedEntries(database.WorkingCopyPath!));
+    }
+
+    [Fact]
+    public async Task Repository_clears_secure_item_scope_from_mdbx_without_rehydrating_entries()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Portal",
+            Password = "secret"
+        };
+        var note = new SecureItem
+        {
+            ItemType = VaultItemType.Note,
+            Title = "Recovery",
+            Notes = "remove from secure scope"
+        };
+        await repository.SavePasswordAsync(password);
+        await repository.SaveSecureItemAsync(note);
+
+        await repository.ClearVaultDataAsync(VaultClearScope.SecureItems);
+
+        Assert.Equal("Portal", Assert.Single(await repository.GetPasswordsAsync()).Title);
+        Assert.Empty(await repository.GetSecureItemsAsync(includeDeleted: true));
+        Assert.Equal(1, bridge.CountActiveEntries(database.WorkingCopyPath!));
+        Assert.Equal(1, bridge.CountDeletedEntries(database.WorkingCopyPath!));
+    }
+
+    [Fact]
+    public async Task Repository_permanently_deletes_password_from_mdbx_without_rehydrating_entry()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Permanent",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var attachment = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "codes.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/codes.enc",
+            SizeBytes = 5
+        };
+        await repository.SaveAttachmentAsync(attachment, "codes"u8.ToArray());
+        var savedAttachment = Assert.Single(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+
+        await repository.DeletePasswordPermanentlyAsync(password.Id);
+
+        Assert.Empty(await repository.GetPasswordsAsync(includeDeleted: true, includeArchived: true));
+        Assert.Empty(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        Assert.Equal(0, bridge.CountActiveEntries(database.WorkingCopyPath!));
+        Assert.Equal(1, bridge.CountDeletedEntries(database.WorkingCopyPath!));
+        Assert.Equal(0, bridge.CountActiveAttachments(database.WorkingCopyPath!));
+        Assert.Null(bridge.TryReadAttachmentContent(database.WorkingCopyPath!, savedAttachment.StoragePath));
+    }
+
     private static IMonicaRepository CreateRepository(out FakeMdbxNativeBridge bridge, IAttachmentContentStore? attachmentContentStore = null)
     {
         var factory = new SqliteConnectionFactory(GetTempDatabasePath());
@@ -369,6 +460,15 @@ public sealed class MdbxRepositoryTests
 
         public int CountEntries(string path) =>
             _vaults.TryGetValue(path, out var vault) ? vault.CountEntries() : 0;
+
+        public int CountActiveEntries(string path) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.CountEntries(deleted: false) : 0;
+
+        public int CountDeletedEntries(string path) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.CountEntries(deleted: true) : 0;
+
+        public int CountActiveAttachments(string path) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.CountAttachments(deleted: false) : 0;
     }
 
     private sealed class FakeAttachmentContentStore : IAttachmentContentStore
@@ -573,6 +673,12 @@ public sealed class MdbxRepositoryTests
         }
 
         public int CountEntries() => _entries.Count;
+
+        public int CountEntries(bool deleted) =>
+            _entries.Count(entry => entry.Deleted == deleted);
+
+        public int CountAttachments(bool deleted) =>
+            _attachments.Count(attachment => attachment.Deleted == deleted);
 
         private MdbxNativeEntryRecord SetDeleted(string projectId, string entryId, bool deleted)
         {
