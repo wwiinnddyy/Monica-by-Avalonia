@@ -1407,6 +1407,41 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_migrates_existing_password_attachment_content_when_sqlite_password_cache_is_missing()
+    {
+        var contentStore = new FakeAttachmentContentStore();
+        var repository = CreateRepository(out var bridge, out var sqliteRepository, contentStore);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Legacy attachment without owner cache",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var content = "legacy owner cache missing bytes"u8.ToArray();
+        var attachment = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "owner-cache-missing.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/owner-cache-missing.enc",
+            SizeBytes = content.Length
+        };
+        await repository.SaveAttachmentAsync(attachment);
+        contentStore.Put(attachment.StoragePath, content);
+        await sqliteRepository.ClearVaultDataAsync(VaultClearScope.Passwords);
+        await sqliteRepository.SaveAttachmentAsync(attachment);
+
+        var migrated = Assert.Single(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+
+        Assert.Equal(attachment.Id, migrated.Id);
+        Assert.StartsWith("mdbx:", migrated.StoragePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(content, bridge.ReadAttachmentContent(database.WorkingCopyPath!, migrated.StoragePath));
+        Assert.Null(contentStore.TryRead(attachment.StoragePath));
+    }
+
+    [Fact]
     public async Task Repository_migrates_legacy_password_attachments_after_default_mdbx_vault_is_added()
     {
         var contentStore = new FakeAttachmentContentStore();

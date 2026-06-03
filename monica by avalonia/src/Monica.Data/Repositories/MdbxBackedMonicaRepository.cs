@@ -864,8 +864,8 @@ public sealed class MdbxBackedMonicaRepository(
             return attachments;
         }
 
-        var categoryById = (await EnsureMdbxCategoriesAsync(database, cancellationToken))
-            .ToDictionary(category => category.Id);
+        var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
+        var categoryById = categories.ToDictionary(category => category.Id);
         var candidates = attachments
             .Where(attachment => attachment.OwnerId > 0)
             .Where(attachment => !string.IsNullOrWhiteSpace(attachment.StoragePath))
@@ -886,7 +886,13 @@ public sealed class MdbxBackedMonicaRepository(
         {
             try
             {
-                if (!passwords.TryGetValue(attachment.OwnerId, out var entry))
+                var entry = await FindPasswordForAttachmentMigrationAsync(
+                    database,
+                    categories,
+                    passwords,
+                    attachment.OwnerId,
+                    cancellationToken);
+                if (entry is null)
                 {
                     continue;
                 }
@@ -914,8 +920,9 @@ public sealed class MdbxBackedMonicaRepository(
                 if (IsUnboundFromMdbx(entry))
                 {
                     await SavePasswordToMdbxAsync(database, entry, categoryById, cancellationToken);
-                    await inner.SavePasswordAsync(entry, cancellationToken);
                 }
+
+                await inner.SavePasswordAsync(entry, cancellationToken);
 
                 await mdbxVaultStore.SavePasswordAttachmentAsync(database, entry, attachment, content, cancellationToken);
                 await inner.SaveAttachmentAsync(attachment, cancellationToken);
@@ -941,6 +948,18 @@ public sealed class MdbxBackedMonicaRepository(
         return attachments
             .Select(attachment => migratedById.TryGetValue(attachment.Id, out var migrated) ? migrated : attachment)
             .ToArray();
+    }
+
+    private async Task<PasswordEntry?> FindPasswordForAttachmentMigrationAsync(
+        LocalMdbxDatabase database,
+        IReadOnlyList<Category> categories,
+        IReadOnlyDictionary<long, PasswordEntry> sqlitePasswords,
+        long ownerId,
+        CancellationToken cancellationToken)
+    {
+        return sqlitePasswords.TryGetValue(ownerId, out var entry)
+            ? entry
+            : await FindPasswordForMdbxOperationAsync(database, categories, ownerId, includeDeleted: false, cancellationToken);
     }
 
     private static bool IsUnboundFromMdbx(PasswordEntry entry) =>
