@@ -32,6 +32,7 @@ public interface IMdbxVaultStore
     Task RestoreSecureItemAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken = default);
     Task SoftDeleteSecureItemEntriesAsync(LocalMdbxDatabase database, CancellationToken cancellationToken = default);
     Task DetachSecureItemsFromPasswordsAsync(LocalMdbxDatabase database, IReadOnlyList<Category> categories, CancellationToken cancellationToken = default);
+    Task<Attachment> SaveSecureItemAttachmentAsync(LocalMdbxDatabase database, SecureItem item, Attachment attachment, byte[] content, CancellationToken cancellationToken = default);
     Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default);
     Task DeleteAttachmentAsync(LocalMdbxDatabase database, Attachment attachment, CancellationToken cancellationToken = default);
 }
@@ -372,9 +373,10 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         var payload = SerializePayload("secure-item", new MdbxSecureItemPayload
         {
             Item = item,
-            Attachments = []
+            Attachments = NormalizeSecureItemAttachments(item.Id, DecodeSecureItemImagePaths(item)).ToList()
         });
         var record = await SaveEntryAsync(vault, project.ProjectId, item.MdbxFolderId, SecureEntryTypes, entryType, item.Title, payload, cancellationToken);
+        await DeleteUnreferencedEntryAttachmentsAsync(vault, record.EntryId, DecodeSecureItemImagePaths(item), cancellationToken);
 
         item.MdbxDatabaseId = database.Id;
         item.MdbxFolderId = record.EntryId;
@@ -474,6 +476,39 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
             item.BoundPasswordId = null;
             await SaveSecureItemAsync(database, item, categoryById, cancellationToken);
         }
+    }
+
+    public async Task<Attachment> SaveSecureItemAttachmentAsync(LocalMdbxDatabase database, SecureItem item, Attachment attachment, byte[] content, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(item.MdbxFolderId))
+        {
+            throw new InvalidOperationException("Secure item must be mirrored to MDBX before saving attachments.");
+        }
+
+        var vault = await OpenAsync(database, cancellationToken);
+        using var _ = vault;
+        var entryRecord = await FindEntryAsync(vault, item.MdbxFolderId!, SecureEntryTypes, includeDeleted: true, cancellationToken)
+            ?? throw new InvalidOperationException("Secure item MDBX entry was not found.");
+        var metadata = await vault.CreateAttachmentMetadataAsync(
+            entryRecord.ProjectId,
+            item.MdbxFolderId,
+            attachment.FileName,
+            string.IsNullOrWhiteSpace(attachment.ContentType) ? null : attachment.ContentType,
+            "",
+            (ulong)Math.Max(0, content.LongLength),
+            cancellationToken);
+        var written = await vault.WriteAttachmentInlineContentAsync(metadata.AttachmentId, content, cancellationToken);
+
+        attachment.OwnerType = "SECURE_ITEM";
+        attachment.OwnerId = item.Id;
+        attachment.StoragePath = ToAttachmentStoragePath(written.AttachmentId);
+        attachment.SizeBytes = checked((long)Math.Min(written.OriginalSize, (ulong)long.MaxValue));
+        if (string.IsNullOrWhiteSpace(attachment.ContentType) && !string.IsNullOrWhiteSpace(written.MediaType))
+        {
+            attachment.ContentType = written.MediaType;
+        }
+
+        return attachment;
     }
 
     public async Task<Attachment> SavePasswordAttachmentAsync(LocalMdbxDatabase database, PasswordEntry entry, Attachment attachment, byte[] content, CancellationToken cancellationToken = default)
@@ -685,6 +720,21 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         return null;
     }
 
+    private static async Task DeleteUnreferencedEntryAttachmentsAsync(IMdbxNativeVault vault, string entryId, IReadOnlyList<string> referencedImagePaths, CancellationToken cancellationToken)
+    {
+        var referencedAttachmentIds = referencedImagePaths
+            .Select(TryParseAttachmentStoragePath)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var attachment in await vault.ListAttachmentsByEntryAsync(entryId, cancellationToken))
+        {
+            if (!referencedAttachmentIds.Contains(attachment.AttachmentId))
+            {
+                await vault.DeleteAttachmentAsync(attachment.AttachmentId, cancellationToken);
+            }
+        }
+    }
+
     private static async Task<IReadOnlyList<MdbxNativeEntryRecord>> ListPasswordRecordsAsync(
         IMdbxNativeVault vault,
         IReadOnlyList<MdbxNativeProjectRecord> projects,
@@ -822,6 +872,21 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
             })
             .ToList();
 
+    private static IReadOnlyList<Attachment> NormalizeSecureItemAttachments(long itemId, IReadOnlyList<string> imagePaths) =>
+        imagePaths
+            .Where(path => TryParseAttachmentStoragePath(path) is not null)
+            .Select((path, index) => new Attachment
+            {
+                OwnerType = "SECURE_ITEM",
+                OwnerId = itemId,
+                FileName = $"image-{index + 1}",
+                ContentType = "",
+                StoragePath = path,
+                SizeBytes = 0,
+                CreatedAt = DateTimeOffset.UtcNow
+            })
+            .ToList();
+
     private static IReadOnlyList<PasswordHistoryEntry> NormalizePasswordHistory(long entryId, IReadOnlyList<PasswordHistoryEntry> passwordHistory) =>
         passwordHistory
             .Where(entry => !string.IsNullOrWhiteSpace(entry.Password))
@@ -845,6 +910,14 @@ public sealed class MdbxVaultStore(IMdbxNativeBridge nativeBridge) : IMdbxVaultS
         VaultItemType.BankCard => "card",
         VaultItemType.Document => "document-ref",
         _ => "note"
+    };
+
+    private static IReadOnlyList<string> DecodeSecureItemImagePaths(SecureItem item) => item.ItemType switch
+    {
+        VaultItemType.Document => WalletItemDataCodec.DecodeDocument(item).ImagePaths,
+        VaultItemType.BankCard => WalletItemDataCodec.DecodeBankCard(item).ImagePaths,
+        VaultItemType.Note => NoteContentCodec.DecodeImagePaths(item.ImagePaths),
+        _ => WalletItemDataCodec.DecodeImagePaths(item.ImagePaths)
     };
 
     public static string ToAttachmentStoragePath(string attachmentId) => $"mdbx:{attachmentId}";

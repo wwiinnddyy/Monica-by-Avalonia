@@ -427,6 +427,80 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_migrates_secure_item_image_paths_to_mdbx_attachments()
+    {
+        var contentStore = new FakeAttachmentContentStore();
+        var repository = CreateRepository(out var bridge, contentStore);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var frontContent = "front image bytes"u8.ToArray();
+        var backContent = "back image bytes"u8.ToArray();
+        contentStore.Put("secure_attachments/front.png", frontContent);
+        contentStore.Put("secure_attachments/back.png", backContent);
+        var document = new SecureItem
+        {
+            ItemType = VaultItemType.Document,
+            Title = "Passport",
+            ItemData = WalletItemDataCodec.EncodeDocument(new DocumentWalletData
+            {
+                DocumentNumber = "P-123",
+                ImagePaths = ["secure_attachments/front.png", "secure_attachments/back.png"]
+            }),
+            ImagePaths = WalletItemDataCodec.EncodeImagePaths(["secure_attachments/front.png", "secure_attachments/back.png"])
+        };
+
+        await repository.SaveSecureItemAsync(document);
+
+        var reloaded = Assert.Single(await repository.GetSecureItemsAsync(VaultItemType.Document));
+        var imagePaths = WalletItemDataCodec.DecodeDocument(reloaded).ImagePaths;
+
+        Assert.Equal(2, imagePaths.Count);
+        Assert.All(imagePaths, path => Assert.StartsWith("mdbx:", path, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(frontContent, bridge.ReadAttachmentContent(database.WorkingCopyPath!, imagePaths[0]));
+        Assert.Equal(backContent, bridge.ReadAttachmentContent(database.WorkingCopyPath!, imagePaths[1]));
+        Assert.Null(contentStore.TryRead("secure_attachments/front.png"));
+        Assert.Null(contentStore.TryRead("secure_attachments/back.png"));
+        Assert.Equal(2, bridge.CountActiveAttachmentsForEntry(database.WorkingCopyPath!, reloaded.MdbxFolderId!));
+    }
+
+    [Fact]
+    public async Task Repository_updates_secure_item_mdbx_attachments_when_image_paths_change()
+    {
+        var contentStore = new FakeAttachmentContentStore();
+        var repository = CreateRepository(out var bridge, contentStore);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        contentStore.Put("secure_attachments/front.png", "front image bytes"u8.ToArray());
+        contentStore.Put("secure_attachments/back.png", "back image bytes"u8.ToArray());
+        var card = new SecureItem
+        {
+            ItemType = VaultItemType.BankCard,
+            Title = "Card",
+            ItemData = WalletItemDataCodec.EncodeBankCard(new BankCardWalletData
+            {
+                CardNumber = "4111111111111111",
+                ImagePaths = ["secure_attachments/front.png"]
+            }),
+            ImagePaths = WalletItemDataCodec.EncodeImagePaths(["secure_attachments/front.png"])
+        };
+        await repository.SaveSecureItemAsync(card);
+        var firstImagePath = Assert.Single(WalletItemDataCodec.DecodeBankCard(card).ImagePaths);
+
+        var cardData = WalletItemDataCodec.DecodeBankCard(card);
+        cardData.ImagePaths = ["secure_attachments/back.png"];
+        card.ItemData = WalletItemDataCodec.EncodeBankCard(cardData);
+        card.ImagePaths = WalletItemDataCodec.EncodeImagePaths(cardData.ImagePaths);
+        await repository.SaveSecureItemAsync(card);
+
+        var reloaded = Assert.Single(await repository.GetSecureItemsAsync(VaultItemType.BankCard));
+        var imagePath = Assert.Single(WalletItemDataCodec.DecodeBankCard(reloaded).ImagePaths);
+
+        Assert.StartsWith("mdbx:", imagePath, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(firstImagePath, imagePath);
+        Assert.Equal("back image bytes"u8.ToArray(), bridge.ReadAttachmentContent(database.WorkingCopyPath!, imagePath));
+        Assert.Null(bridge.TryReadAttachmentContent(database.WorkingCopyPath!, firstImagePath));
+        Assert.Equal(1, bridge.CountActiveAttachmentsForEntry(database.WorkingCopyPath!, reloaded.MdbxFolderId!));
+    }
+
+    [Fact]
     public async Task Repository_reads_legacy_secure_item_payloads_from_mdbx_store()
     {
         var repository = CreateRepository(out var bridge);
@@ -1248,6 +1322,9 @@ public sealed class MdbxRepositoryTests
         public int CountActiveAttachments(string path) =>
             _vaults.TryGetValue(path, out var vault) ? vault.CountAttachments(deleted: false) : 0;
 
+        public int CountActiveAttachmentsForEntry(string path, string entryId) =>
+            _vaults.TryGetValue(path, out var vault) ? vault.CountAttachments(entryId, deleted: false) : 0;
+
         public string? GetEntryPayloadJson(string path, string entryId) =>
             _vaults.TryGetValue(path, out var vault) ? vault.GetEntryPayloadJson(entryId) : null;
     }
@@ -1460,6 +1537,9 @@ public sealed class MdbxRepositoryTests
 
         public int CountAttachments(bool deleted) =>
             _attachments.Count(attachment => attachment.Deleted == deleted);
+
+        public int CountAttachments(string entryId, bool deleted) =>
+            _attachments.Count(attachment => attachment.EntryId == entryId && attachment.Deleted == deleted);
 
         public string? GetEntryPayloadJson(string entryId) =>
             _entries.FirstOrDefault(entry => string.Equals(entry.EntryId, entryId, StringComparison.OrdinalIgnoreCase))?.PayloadJson;

@@ -383,11 +383,6 @@ public sealed class MdbxBackedMonicaRepository(
 
     public async Task<byte[]?> TryReadAttachmentContentAsync(Attachment attachment, CancellationToken cancellationToken = default)
     {
-        if (!IsPasswordOwnerType(attachment.OwnerType))
-        {
-            return await inner.TryReadAttachmentContentAsync(attachment, cancellationToken);
-        }
-
         var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
         if (database is not null && MdbxVaultStore.TryParseAttachmentStoragePath(attachment.StoragePath) is not null)
         {
@@ -589,7 +584,7 @@ public sealed class MdbxBackedMonicaRepository(
 
         await inner.SaveSecureItemAsync(item, cancellationToken);
         var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
-        await mdbxVaultStore.SaveSecureItemAsync(database, item, categories.ToDictionary(category => category.Id), cancellationToken);
+        await SaveSecureItemToMdbxAsync(database, item, categories.ToDictionary(category => category.Id), cancellationToken);
         await inner.SaveSecureItemAsync(item, cancellationToken);
         return item.Id;
     }
@@ -652,7 +647,7 @@ public sealed class MdbxBackedMonicaRepository(
                          .Where(item => item.CategoryId == id))
             {
                 item.CategoryId = null;
-                await mdbxVaultStore.SaveSecureItemAsync(database, item, categories, cancellationToken);
+                await SaveSecureItemToMdbxAsync(database, item, categories, cancellationToken);
                 await inner.SaveSecureItemAsync(item, cancellationToken);
             }
         }
@@ -784,7 +779,7 @@ public sealed class MdbxBackedMonicaRepository(
         var sqliteItems = await inner.GetSecureItemsAsync(includeDeleted: true, cancellationToken: cancellationToken);
         foreach (var item in sqliteItems.Where(IsUnboundFromMdbx))
         {
-            await mdbxVaultStore.SaveSecureItemAsync(database, item, categories, cancellationToken);
+            await SaveSecureItemToMdbxAsync(database, item, categories, cancellationToken);
             if (item.IsDeleted)
             {
                 await mdbxVaultStore.SoftDeleteSecureItemAsync(database, item, cancellationToken);
@@ -1066,6 +1061,140 @@ public sealed class MdbxBackedMonicaRepository(
         }
 
         return null;
+    }
+
+    private async Task SaveSecureItemToMdbxAsync(
+        LocalMdbxDatabase database,
+        SecureItem item,
+        IReadOnlyDictionary<long, Category> categories,
+        CancellationToken cancellationToken)
+    {
+        await mdbxVaultStore.SaveSecureItemAsync(database, item, categories, cancellationToken);
+        if (attachmentContentStore is not null && await MigrateSecureItemImagePathsAsync(database, item, cancellationToken))
+        {
+            await mdbxVaultStore.SaveSecureItemAsync(database, item, categories, cancellationToken);
+        }
+    }
+
+    private async Task<bool> MigrateSecureItemImagePathsAsync(LocalMdbxDatabase database, SecureItem item, CancellationToken cancellationToken)
+    {
+        if (attachmentContentStore is null || item.Id <= 0 || string.IsNullOrWhiteSpace(item.MdbxFolderId))
+        {
+            return false;
+        }
+
+        var imagePaths = DecodeSecureItemImagePaths(item);
+        if (imagePaths.Count == 0 || imagePaths.All(path => MdbxVaultStore.TryParseAttachmentStoragePath(path) is not null))
+        {
+            return false;
+        }
+
+        var changed = false;
+        var migratedPaths = new List<string>(imagePaths.Count);
+        foreach (var path in imagePaths)
+        {
+            if (MdbxVaultStore.TryParseAttachmentStoragePath(path) is not null)
+            {
+                migratedPaths.Add(path);
+                continue;
+            }
+
+            var sourceAttachment = CreateSecureItemImageAttachment(item, path);
+            var content = await attachmentContentStore.TryReadAttachmentContentAsync(sourceAttachment, cancellationToken);
+            if (content is null || content.Length == 0)
+            {
+                migratedPaths.Add(path);
+                continue;
+            }
+
+            var mdbxAttachment = CreateSecureItemImageAttachment(item, path);
+            await mdbxVaultStore.SaveSecureItemAttachmentAsync(database, item, mdbxAttachment, content, cancellationToken);
+            migratedPaths.Add(mdbxAttachment.StoragePath);
+            await attachmentContentStore.DeleteAttachmentContentAsync(sourceAttachment, cancellationToken);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            ApplySecureItemImagePaths(item, migratedPaths);
+        }
+
+        return changed;
+    }
+
+    private static IReadOnlyList<string> DecodeSecureItemImagePaths(SecureItem item) => item.ItemType switch
+    {
+        VaultItemType.Document => WalletItemDataCodec.DecodeDocument(item).ImagePaths,
+        VaultItemType.BankCard => WalletItemDataCodec.DecodeBankCard(item).ImagePaths,
+        VaultItemType.Note => NoteContentCodec.DecodeImagePaths(item.ImagePaths),
+        _ => WalletItemDataCodec.DecodeImagePaths(item.ImagePaths)
+    };
+
+    private static void ApplySecureItemImagePaths(SecureItem item, IReadOnlyList<string> imagePaths)
+    {
+        var encoded = WalletItemDataCodec.EncodeImagePaths(imagePaths);
+        item.ImagePaths = encoded;
+        if (item.ItemType == VaultItemType.Note)
+        {
+            var note = NoteContentCodec.DecodeFromItem(item);
+            item.ItemData = NoteContentCodec.BuildSavePayload(
+                item.Title,
+                note.Content,
+                string.Join(",", note.Tags),
+                note.IsMarkdown,
+                imagePaths).ItemData;
+            return;
+        }
+
+        if (item.ItemType == VaultItemType.Document)
+        {
+            var data = WalletItemDataCodec.DecodeDocument(item);
+            data.ImagePaths = imagePaths.ToList();
+            item.ItemData = WalletItemDataCodec.EncodeDocument(data);
+            return;
+        }
+
+        if (item.ItemType == VaultItemType.BankCard)
+        {
+            var data = WalletItemDataCodec.DecodeBankCard(item);
+            data.ImagePaths = imagePaths.ToList();
+            item.ItemData = WalletItemDataCodec.EncodeBankCard(data);
+        }
+    }
+
+    private static Attachment CreateSecureItemImageAttachment(SecureItem item, string imagePath)
+    {
+        var fileName = Path.GetFileName(imagePath.Replace('\\', Path.DirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = item.ItemType == VaultItemType.BankCard ? "card-image" : "secure-item-image";
+        }
+
+        return new Attachment
+        {
+            OwnerType = "SECURE_ITEM",
+            OwnerId = item.Id,
+            FileName = fileName,
+            ContentType = InferImageContentType(fileName),
+            StoragePath = imagePath,
+            CreatedAt = item.UpdatedAt == default ? DateTimeOffset.UtcNow : item.UpdatedAt
+        };
+    }
+
+    private static string InferImageContentType(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLowerInvariant();
+        return extension switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            ".pdf" => "application/pdf",
+            _ => ""
+        };
     }
 
     private static bool IsUnboundFromMdbx(SecureItem item) =>
