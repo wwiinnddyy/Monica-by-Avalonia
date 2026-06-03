@@ -400,8 +400,27 @@ public sealed class MdbxBackedMonicaRepository(
 
     public async Task DeleteAttachmentAsync(long id, CancellationToken cancellationToken = default)
     {
-        var ownerId = await FindPasswordAttachmentOwnerIdAsync(id, cancellationToken);
-        await inner.DeleteAttachmentAsync(id, cancellationToken);
+        var attachment = await FindPasswordAttachmentAsync(id, cancellationToken);
+        if (attachment is null)
+        {
+            await inner.DeleteAttachmentAsync(id, cancellationToken);
+            return;
+        }
+
+        await DeleteAttachmentAsync(id, attachment, cancellationToken);
+    }
+
+    private async Task DeletePasswordAttachmentContentAsync(Attachment attachment, CancellationToken cancellationToken)
+    {
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is not null)
+        {
+            await mdbxVaultStore.DeleteAttachmentAsync(database, attachment, cancellationToken);
+        }
+    }
+
+    private async Task SyncPasswordAttachmentOwnerAfterDeleteAsync(long? ownerId, CancellationToken cancellationToken)
+    {
         if (ownerId is not null)
         {
             await SyncPasswordAttachmentsOwnerToMdbxAsync(ownerId.Value, cancellationToken);
@@ -413,17 +432,10 @@ public sealed class MdbxBackedMonicaRepository(
         var ownerId = IsPasswordOwnerType(attachment.OwnerType) && attachment.OwnerId > 0
             ? attachment.OwnerId
             : await FindPasswordAttachmentOwnerIdAsync(id, cancellationToken);
-        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
-        if (database is not null)
-        {
-            await mdbxVaultStore.DeleteAttachmentAsync(database, attachment, cancellationToken);
-        }
+        await DeletePasswordAttachmentContentAsync(attachment, cancellationToken);
 
         await inner.DeleteAttachmentAsync(id, attachment, cancellationToken);
-        if (ownerId is not null)
-        {
-            await SyncPasswordAttachmentsOwnerToMdbxAsync(ownerId.Value, cancellationToken);
-        }
+        await SyncPasswordAttachmentOwnerAfterDeleteAsync(ownerId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<PasswordHistoryEntry>> GetPasswordHistoryAsync(long entryId, CancellationToken cancellationToken = default)
@@ -900,20 +912,38 @@ public sealed class MdbxBackedMonicaRepository(
 
     private async Task<long?> FindPasswordAttachmentOwnerIdAsync(long attachmentId, CancellationToken cancellationToken)
     {
+        return (await FindPasswordAttachmentAsync(attachmentId, cancellationToken))?.OwnerId;
+    }
+
+    private async Task<Attachment?> FindPasswordAttachmentAsync(long attachmentId, CancellationToken cancellationToken)
+    {
         if (attachmentId <= 0)
         {
             return null;
         }
 
-        foreach (var password in await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken))
+        var passwords = await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken);
+        foreach (var password in passwords)
         {
-            if ((await inner.GetAttachmentsAsync("PASSWORD", password.Id, cancellationToken)).Any(attachment => attachment.Id == attachmentId))
+            var attachment = (await inner.GetAttachmentsAsync("PASSWORD", password.Id, cancellationToken))
+                .FirstOrDefault(attachment => attachment.Id == attachmentId);
+            if (attachment is not null)
             {
-                return password.Id;
+                return attachment;
             }
         }
 
-        return null;
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is null)
+        {
+            return null;
+        }
+
+        var ids = passwords.Select(password => password.Id).Where(id => id > 0).Distinct().ToArray();
+        var mdbxAttachmentsByEntryId = await mdbxVaultStore.GetPasswordAttachmentsByEntryIdsAsync(database, ids, cancellationToken);
+        return mdbxAttachmentsByEntryId.Values
+            .SelectMany(attachments => attachments)
+            .FirstOrDefault(attachment => attachment.Id == attachmentId);
     }
 
     private async Task SyncPasswordHistoryOwnerToMdbxAsync(long entryId, CancellationToken cancellationToken)
