@@ -707,13 +707,17 @@ public sealed class MdbxBackedMonicaRepository(
         var databases = await inner.GetMdbxDatabasesAsync(cancellationToken);
         return databases
             .Where(database => database.IsDefault)
-            .Where(database => database.StorageLocation is MdbxStorageLocation.Internal or MdbxStorageLocation.External)
+            .Where(CanUseMdbxWorkingCopy)
             .Where(database => !string.IsNullOrWhiteSpace(database.EncryptedPassword))
             .Where(database => !string.IsNullOrWhiteSpace(database.WorkingCopyPath ?? database.FilePath))
             .OrderBy(database => database.SortOrder)
             .ThenBy(database => database.Id)
             .FirstOrDefault();
     }
+
+    private static bool CanUseMdbxWorkingCopy(LocalMdbxDatabase database) =>
+        database.StorageLocation is MdbxStorageLocation.Internal or MdbxStorageLocation.External ||
+        !string.IsNullOrWhiteSpace(database.WorkingCopyPath);
 
     private async Task<IReadOnlyList<Category>> EnsureMdbxCategoriesAsync(LocalMdbxDatabase database, CancellationToken cancellationToken)
     {

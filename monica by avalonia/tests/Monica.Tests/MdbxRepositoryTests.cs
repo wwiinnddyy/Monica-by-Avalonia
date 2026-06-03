@@ -57,6 +57,58 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_uses_remote_mdbx_working_copy_as_default_store()
+    {
+        var repository = CreateRepository(out var bridge);
+        var database = await SaveDefaultMdbxDatabaseAsync(
+            repository,
+            MdbxStorageLocation.RemoteWebDav,
+            "REMOTE_WEBDAV");
+        database.FilePath = "/Monica/local.mdbx";
+        await repository.SaveMdbxDatabaseAsync(database);
+        var password = new PasswordEntry
+        {
+            Title = "Remote-backed",
+            Password = "secret"
+        };
+
+        await repository.SavePasswordAsync(password);
+
+        var reloaded = Assert.Single(await repository.GetPasswordsAsync());
+        Assert.Equal(database.Id, reloaded.MdbxDatabaseId);
+        Assert.False(string.IsNullOrWhiteSpace(reloaded.MdbxFolderId));
+        Assert.Equal("Remote-backed", reloaded.Title);
+        Assert.Contains(database.WorkingCopyPath!, bridge.OpenedPaths);
+    }
+
+    [Fact]
+    public async Task Repository_ignores_remote_mdbx_metadata_without_working_copy()
+    {
+        var repository = CreateRepository(out var bridge);
+        await repository.SaveMdbxDatabaseAsync(new LocalMdbxDatabase
+        {
+            Name = "Remote metadata only",
+            FilePath = "/Monica/local.mdbx",
+            StorageLocation = MdbxStorageLocation.RemoteWebDav,
+            SourceType = "REMOTE_WEBDAV",
+            EncryptedPassword = "test-mdbx-password",
+            IsDefault = true
+        });
+        var password = new PasswordEntry
+        {
+            Title = "SQLite fallback",
+            Password = "secret"
+        };
+
+        await repository.SavePasswordAsync(password);
+
+        var reloaded = Assert.Single(await repository.GetPasswordsAsync());
+        Assert.Null(reloaded.MdbxDatabaseId);
+        Assert.Null(reloaded.MdbxFolderId);
+        Assert.Empty(bridge.OpenedPaths);
+    }
+
+    [Fact]
     public async Task Repository_roundtrips_password_custom_fields_through_mdbx_payload()
     {
         var repository = CreateRepository(out _, out var sqliteRepository);
@@ -1087,19 +1139,24 @@ public sealed class MdbxRepositoryTests
         return new MdbxBackedMonicaRepository(inner, new MdbxVaultStore(bridge), attachmentContentStore);
     }
 
-    private static async Task<LocalMdbxDatabase> SaveDefaultMdbxDatabaseAsync(IMonicaRepository repository)
+    private static async Task<LocalMdbxDatabase> SaveDefaultMdbxDatabaseAsync(
+        IMonicaRepository repository,
+        MdbxStorageLocation storageLocation = MdbxStorageLocation.Internal,
+        string sourceType = "LOCAL_INTERNAL")
     {
         var database = new LocalMdbxDatabase
         {
             Name = "Local",
             FilePath = Path.Combine(GetTempRootPath(), $"{Guid.NewGuid():N}.mdbx"),
             WorkingCopyPath = Path.Combine(GetTempRootPath(), $"{Guid.NewGuid():N}.mdbx"),
-            StorageLocation = MdbxStorageLocation.Internal,
-            SourceType = "LOCAL_INTERNAL",
+            StorageLocation = storageLocation,
+            SourceType = sourceType,
             EncryptedPassword = "test-mdbx-password",
             IsDefault = true,
             IsOfflineAvailable = true,
-            LastSyncStatus = SyncStatus.LocalOnly
+            LastSyncStatus = storageLocation is MdbxStorageLocation.Internal or MdbxStorageLocation.External
+                ? SyncStatus.LocalOnly
+                : SyncStatus.PendingUpload
         };
         await repository.SaveMdbxDatabaseAsync(database);
         return database;

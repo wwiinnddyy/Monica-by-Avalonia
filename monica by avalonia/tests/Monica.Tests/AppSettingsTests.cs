@@ -7,6 +7,7 @@ using Monica.Data;
 using Monica.Data.Repositories;
 using Monica.Data.Services;
 using Monica.Platform.Services;
+using Microsoft.Data.Sqlite;
 
 namespace Monica.Tests;
 
@@ -258,6 +259,18 @@ public sealed class AppSettingsTests
         Assert.Equal(1, viewModel.MdbxOneDriveDatabaseCount);
         Assert.All(viewModel.MdbxDatabaseItems, item => Assert.True(item.IsRemote));
         Assert.Contains(viewModel.MdbxDatabaseItems, item => item.RemotePath == "/Monica/local.mdbx");
+        Assert.All(viewModel.MdbxDatabases, database =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(database.EncryptedPassword));
+            Assert.False(string.IsNullOrWhiteSpace(database.WorkingCopyPath));
+            Assert.True(File.Exists(database.WorkingCopyPath));
+        });
+        Assert.Equal("MDBX-1", await ReadMdbxFormatVersionAsync(viewModel.MdbxDatabases[0].WorkingCopyPath!));
+
+        await viewModel.OpenMdbxDatabaseCommand.ExecuteAsync(viewModel.MdbxDatabaseItems[0]);
+
+        Assert.Equal(SyncStatus.PendingUpload, viewModel.MdbxDatabases[0].LastSyncStatus);
+        Assert.StartsWith("Opened ", viewModel.StatusMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -748,6 +761,15 @@ public sealed class AppSettingsTests
         var path = Path.Combine(Path.GetTempPath(), "monica-tests", $"{Guid.NewGuid():N}.settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         return path;
+    }
+
+    private static async Task<string> ReadMdbxFormatVersionAsync(string path)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT format_version FROM vault_meta LIMIT 1";
+        return (string)(await command.ExecuteScalarAsync() ?? "");
     }
 
     private static async Task<AppSettingsService> LoadSettingsUntilAsync(string path, Func<DesktopAppSettings, bool> predicate)

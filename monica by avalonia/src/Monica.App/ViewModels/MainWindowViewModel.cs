@@ -3752,13 +3752,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var metadata = CreateRemoteMdbxMetadata(
+        var metadata = await CreateRemoteMdbxMetadataAsync(
             _localization.Get("MdbxWebDavVaultName"),
             remotePath,
             MdbxStorageLocation.RemoteWebDav,
             "REMOTE_WEBDAV",
             BuildMdbxWorkingCopyPath("webdav-local.mdbx"),
             _localization.Get("MdbxWebDavMetadataDescription"));
+        metadata.IsDefault = MdbxDatabases.Count == 0;
         await _repository.SaveMdbxDatabaseAsync(metadata);
         MdbxDatabases.Add(metadata);
         RefreshMdbxVaultState();
@@ -3785,13 +3786,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var metadata = CreateRemoteMdbxMetadata(
+        var metadata = await CreateRemoteMdbxMetadataAsync(
             _localization.Get("MdbxOneDriveVaultName"),
             remotePath,
             MdbxStorageLocation.RemoteOneDrive,
             "REMOTE_ONEDRIVE",
             BuildMdbxWorkingCopyPath("onedrive-local.mdbx"),
             _localization.Get("MdbxOneDriveMetadataDescription"));
+        metadata.IsDefault = MdbxDatabases.Count == 0;
         await _repository.SaveMdbxDatabaseAsync(metadata);
         MdbxDatabases.Add(metadata);
         RefreshMdbxVaultState();
@@ -3821,7 +3823,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (!item.IsLocal)
+        if (string.IsNullOrWhiteSpace(item.Database.WorkingCopyPath ?? item.Database.FilePath))
         {
             StatusMessage = _localization.Get("MdbxRemoteOpenPending");
             return;
@@ -3829,7 +3831,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         await using var stream = await _mdbxVaultService.OpenLocalStreamAsync(item.Database);
         item.Database.LastAccessedAt = DateTimeOffset.UtcNow;
-        item.Database.LastSyncStatus = SyncStatus.LocalOnly;
+        item.Database.LastSyncStatus = item.IsRemote ? SyncStatus.PendingUpload : SyncStatus.LocalOnly;
         await _repository.SaveMdbxDatabaseAsync(item.Database);
         RefreshMdbxVaultState();
         RefreshVaultSources();
@@ -4090,27 +4092,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
         return Path.Combine(root, fileName);
     }
 
-    private LocalMdbxDatabase CreateRemoteMdbxMetadata(
+    private async Task<LocalMdbxDatabase> CreateRemoteMdbxMetadataAsync(
         string name,
         string remotePath,
         MdbxStorageLocation storageLocation,
         string sourceType,
         string workingCopyPath,
-        string description) => new()
+        string description)
     {
-        Name = name,
-        FilePath = remotePath,
-        StorageLocation = storageLocation,
-        SourceType = sourceType,
-        TigaMode = MdbxTigaMode.Multi,
-        UnlockMethod = MdbxUnlockMethod.MasterPassword,
-        LastSyncStatus = SyncStatus.Pending,
-        WorkingCopyPath = workingCopyPath,
-        IsOfflineAvailable = MdbxLocalCacheEnabled,
-        Description = description,
-        CreatedAt = DateTimeOffset.UtcNow,
-        LastAccessedAt = DateTimeOffset.UtcNow
-    };
+        var metadata = await _mdbxVaultService.CreateLocalMetadataAsync(name, workingCopyPath, MdbxTigaMode.Multi);
+        metadata.FilePath = remotePath;
+        metadata.StorageLocation = storageLocation;
+        metadata.SourceType = sourceType;
+        metadata.LastSyncStatus = SyncStatus.PendingUpload;
+        metadata.IsOfflineAvailable = true;
+        metadata.Description = description;
+        return metadata;
+    }
 
     private string FormatLocalDate(DateTimeOffset value) =>
         value.ToLocalTime().ToString("yyyy/MM/dd HH:mm", _localization.Culture);
