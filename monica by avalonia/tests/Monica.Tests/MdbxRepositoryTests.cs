@@ -57,6 +57,27 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_records_quick_access_when_sqlite_password_cache_is_missing()
+    {
+        var repository = CreateRepository(out _, out var sqliteRepository);
+        await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Quick access from MDBX",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        await sqliteRepository.ClearVaultDataAsync(VaultClearScope.Passwords);
+
+        await repository.RecordPasswordQuickAccessAsync(password.Id);
+        await repository.RecordPasswordQuickAccessAsync(password.Id);
+
+        var record = Assert.Single(await repository.GetPasswordQuickAccessRecordsAsync());
+        Assert.Equal(password.Id, record.PasswordId);
+        Assert.Equal(2, record.OpenCount);
+    }
+
+    [Fact]
     public async Task Repository_cascades_password_delete_restore_to_mdbx_bound_totps_when_sqlite_cache_is_missing()
     {
         var repository = CreateRepository(out var bridge, out var sqliteRepository);

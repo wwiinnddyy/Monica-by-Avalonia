@@ -551,8 +551,11 @@ public sealed class MdbxBackedMonicaRepository(
         await SyncPasswordHistoryOwnerToMdbxAsync(entryId, cancellationToken);
     }
 
-    public Task RecordPasswordQuickAccessAsync(long passwordId, CancellationToken cancellationToken = default) =>
-        inner.RecordPasswordQuickAccessAsync(passwordId, cancellationToken);
+    public async Task RecordPasswordQuickAccessAsync(long passwordId, CancellationToken cancellationToken = default)
+    {
+        await EnsurePasswordQuickAccessOwnerCacheAsync(passwordId, cancellationToken);
+        await inner.RecordPasswordQuickAccessAsync(passwordId, cancellationToken);
+    }
 
     public Task<IReadOnlyList<PasswordQuickAccessRecord>> GetPasswordQuickAccessRecordsAsync(CancellationToken cancellationToken = default) =>
         inner.GetPasswordQuickAccessRecordsAsync(cancellationToken);
@@ -1161,6 +1164,22 @@ public sealed class MdbxBackedMonicaRepository(
     }
 
     private async Task EnsurePasswordHistoryOwnerCacheAsync(long entryId, CancellationToken cancellationToken)
+    {
+        var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
+        if (database is null)
+        {
+            return;
+        }
+
+        var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
+        var entry = await FindPasswordForMdbxOperationAsync(database, categories, entryId, includeDeleted: false, cancellationToken);
+        if (entry is not null)
+        {
+            await inner.SavePasswordAsync(entry, cancellationToken);
+        }
+    }
+
+    private async Task EnsurePasswordQuickAccessOwnerCacheAsync(long entryId, CancellationToken cancellationToken)
     {
         var database = await GetDefaultLocalMdbxDatabaseAsync(cancellationToken);
         if (database is null)
