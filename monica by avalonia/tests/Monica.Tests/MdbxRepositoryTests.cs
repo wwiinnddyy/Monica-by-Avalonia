@@ -980,6 +980,38 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_saves_password_attachment_to_mdbx_when_sqlite_password_cache_is_missing()
+    {
+        var repository = CreateRepository(out var bridge, out var sqliteRepository);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "MDBX-only attachment owner",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        await sqliteRepository.ClearVaultDataAsync(VaultClearScope.Passwords);
+        var content = "mdbx-only attachment bytes"u8.ToArray();
+        var attachment = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "owner-cache-missing.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/owner-cache-missing.enc",
+            SizeBytes = content.Length
+        };
+
+        await repository.SaveAttachmentAsync(attachment, content);
+
+        var saved = Assert.Single(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        Assert.Equal("owner-cache-missing.txt", saved.FileName);
+        Assert.StartsWith("mdbx:", saved.StoragePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(content, bridge.ReadAttachmentContent(database.WorkingCopyPath!, saved.StoragePath));
+        Assert.Equal(content, await repository.TryReadAttachmentContentAsync(saved));
+    }
+
+    [Fact]
     public async Task Repository_reads_password_attachment_metadata_from_mdbx_payload()
     {
         var repository = CreateRepository(out _, out var sqliteRepository);

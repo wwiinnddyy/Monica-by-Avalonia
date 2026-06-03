@@ -424,13 +424,13 @@ public sealed class MdbxBackedMonicaRepository(
             content.Length > 0 &&
             string.Equals(attachment.OwnerType, "PASSWORD", StringComparison.OrdinalIgnoreCase))
         {
-            var entry = (await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken))
-                .FirstOrDefault(item => item.Id == attachment.OwnerId);
+            var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
+            var entry = await FindPasswordForMdbxOperationAsync(database, categories, attachment.OwnerId, includeDeleted: true, cancellationToken);
             if (entry is not null)
             {
                 if (IsUnboundFromMdbx(entry))
                 {
-                    await SavePasswordToMdbxAsync(database, entry, (await EnsureMdbxCategoriesAsync(database, cancellationToken)).ToDictionary(category => category.Id), cancellationToken);
+                    await SavePasswordToMdbxAsync(database, entry, categories.ToDictionary(category => category.Id), cancellationToken);
                     await inner.SavePasswordAsync(entry, cancellationToken);
                 }
 
@@ -1023,14 +1023,13 @@ public sealed class MdbxBackedMonicaRepository(
             return;
         }
 
-        var entry = (await inner.GetPasswordsAsync(includeDeleted: true, includeArchived: true, cancellationToken))
-            .FirstOrDefault(item => item.Id == entryId);
+        var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
+        var entry = await FindPasswordForMdbxOperationAsync(database, categories, entryId, includeDeleted: true, cancellationToken);
         if (entry is null)
         {
             return;
         }
 
-        var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
         var customFields = entry.Id > 0
             ? await inner.GetCustomFieldsAsync(entry.Id, cancellationToken)
             : [];
