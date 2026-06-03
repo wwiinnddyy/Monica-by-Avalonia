@@ -1087,7 +1087,14 @@ public sealed class MdbxBackedMonicaRepository(
             return null;
         }
 
-        var ids = passwords.Select(password => password.Id).Where(id => id > 0).Distinct().ToArray();
+        var categories = await EnsureMdbxCategoriesAsync(database, cancellationToken);
+        var ids = passwords
+            .Select(password => password.Id)
+            .Concat((await mdbxVaultStore.GetPasswordsAsync(database, categories, includeDeleted: false, includeArchived: true, cancellationToken))
+                .Select(password => password.Id))
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
         var mdbxAttachmentsByEntryId = await mdbxVaultStore.GetPasswordAttachmentsByEntryIdsAsync(database, ids, cancellationToken);
         return mdbxAttachmentsByEntryId.Values
             .SelectMany(attachments => attachments)

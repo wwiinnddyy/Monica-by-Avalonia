@@ -1312,6 +1312,37 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_deletes_mdbx_attachment_by_id_when_sqlite_password_cache_is_missing()
+    {
+        var repository = CreateRepository(out var bridge, out var sqliteRepository);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Delete attachment without owner cache",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var attachment = new Attachment
+        {
+            OwnerType = "PASSWORD",
+            OwnerId = password.Id,
+            FileName = "codes.txt",
+            ContentType = "text/plain",
+            StoragePath = "secure_attachments/codes.enc",
+            SizeBytes = 5
+        };
+        await repository.SaveAttachmentAsync(attachment, "codes"u8.ToArray());
+        var saved = Assert.Single(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        await sqliteRepository.ClearVaultDataAsync(VaultClearScope.Passwords);
+
+        await repository.DeleteAttachmentAsync(saved.Id);
+
+        Assert.Empty(await repository.GetAttachmentsAsync("PASSWORD", password.Id));
+        Assert.Equal(0, bridge.CountActiveAttachments(database.WorkingCopyPath!));
+        Assert.Null(bridge.TryReadAttachmentContent(database.WorkingCopyPath!, saved.StoragePath));
+    }
+
+    [Fact]
     public async Task Repository_migrates_existing_password_attachment_content_to_mdbx_when_listed()
     {
         var contentStore = new FakeAttachmentContentStore();
