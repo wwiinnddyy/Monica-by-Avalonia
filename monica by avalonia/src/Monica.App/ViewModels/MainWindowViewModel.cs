@@ -2685,9 +2685,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ExportData()
+    private async Task ExportDataAsync()
     {
-        ExportPreview = BuildMonicaJsonExport(
+        ExportPreview = await BuildMonicaJsonExportAsync(
             includePasswords: true,
             includeTotp: true,
             includeNotes: true,
@@ -2699,38 +2699,40 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ExportPasswordCsv()
+    private async Task ExportPasswordCsvAsync()
     {
-        var exportPasswords = Passwords.Select(item => ClonePasswordForExport(item)).ToArray();
+        var exportPasswords = (await _repository.GetPasswordsAsync())
+            .Select(item => ClonePasswordForExport(item))
+            .ToArray();
         ExportCsvPreview = _importExportService.ExportPasswordCsv(exportPasswords);
         StatusMessage = _localization.Get("ExportedPasswordCsv");
     }
 
     [RelayCommand]
-    private void ExportTotpCsv()
+    private async Task ExportTotpCsvAsync()
     {
-        ExportTotpCsvPreview = BuildTotpCsvExport();
+        ExportTotpCsvPreview = await BuildTotpCsvExportAsync();
         StatusMessage = _localization.Get("ExportedTotpCsv");
     }
 
     [RelayCommand]
-    private void ExportNoteCsv()
+    private async Task ExportNoteCsvAsync()
     {
-        ExportNoteCsvPreview = BuildNoteCsvExport();
+        ExportNoteCsvPreview = await BuildNoteCsvExportAsync();
         StatusMessage = _localization.Get("ExportedNoteCsv");
     }
 
     [RelayCommand]
-    private void ExportWalletCsv()
+    private async Task ExportWalletCsvAsync()
     {
-        ExportWalletCsvPreview = BuildWalletCsvExport();
+        ExportWalletCsvPreview = await BuildWalletCsvExportAsync();
         StatusMessage = _localization.Get("ExportedWalletCsv");
     }
 
     [RelayCommand]
-    private void ExportAegisJson()
+    private async Task ExportAegisJsonAsync()
     {
-        ExportAegisPreview = BuildAegisJsonExport();
+        ExportAegisPreview = await BuildAegisJsonExportAsync();
         StatusMessage = _localization.Get("ExportedAegisJson");
     }
 
@@ -2839,7 +2841,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ExportPreview))
         {
-            ExportData();
+            await ExportDataAsync();
         }
 
         await SaveExportTextAsync(
@@ -2854,7 +2856,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ExportCsvPreview))
         {
-            ExportPasswordCsv();
+            await ExportPasswordCsvAsync();
         }
 
         await SaveExportTextAsync(
@@ -2869,7 +2871,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ExportTotpCsvPreview))
         {
-            ExportTotpCsv();
+            await ExportTotpCsvAsync();
         }
 
         await SaveExportTextAsync(
@@ -2884,7 +2886,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ExportNoteCsvPreview))
         {
-            ExportNoteCsv();
+            await ExportNoteCsvAsync();
         }
 
         await SaveExportTextAsync(
@@ -2899,7 +2901,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ExportWalletCsvPreview))
         {
-            ExportWalletCsv();
+            await ExportWalletCsvAsync();
         }
 
         await SaveExportTextAsync(
@@ -2914,7 +2916,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ExportAegisPreview))
         {
-            ExportAegisJson();
+            await ExportAegisJsonAsync();
         }
 
         await SaveExportTextAsync(
@@ -3022,7 +3024,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         try
         {
             IsRunningWebDavBackup = true;
-            var json = BuildMonicaJsonExport(
+            var json = await BuildMonicaJsonExportAsync(
                 WebDavBackupIncludePasswords,
                 WebDavBackupIncludeTotp,
                 WebDavBackupIncludeNotes,
@@ -3129,7 +3131,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private string BuildMonicaJsonExport(
+    private async Task<string> BuildMonicaJsonExportAsync(
         bool includePasswords,
         bool includeTotp,
         bool includeNotes,
@@ -3138,59 +3140,101 @@ public sealed partial class MainWindowViewModel : ObservableObject
         bool includeImages,
         bool includeCategories)
     {
+        var passwords = await _repository.GetPasswordsAsync();
+        var secureItems = await _repository.GetSecureItemsAsync();
+        var categories = includeCategories
+            ? await _repository.GetCategoriesAsync()
+            : Array.Empty<Category>();
+        var totpItems = BuildStoredAndVirtualTotpItems(passwords, secureItems);
         var exportPasswords = includePasswords
-            ? Passwords.Select(item => ClonePasswordForExport(item, includeCategories)).ToArray()
+            ? passwords.Select(item => ClonePasswordForExport(item, includeCategories)).ToArray()
             : Array.Empty<PasswordEntry>();
-        var exportSecureItems = TotpItems
+        var exportSecureItems = totpItems
             .Where(_ => includeTotp)
-            .Concat(NoteItems.Where(_ => includeNotes))
-            .Concat(WalletItems.Where(item =>
+            .Concat(secureItems.Where(item => includeNotes && item.ItemType == VaultItemType.Note))
+            .Concat(secureItems.Where(item =>
                 (item.ItemType == VaultItemType.BankCard && includeCards) ||
                 (item.ItemType == VaultItemType.Document && includeDocuments)))
             .Where(item => item.Id > 0)
             .Select(item => CloneSecureItemForExport(item, includeCategories, includeImages))
             .ToArray();
         var exportCategories = includeCategories
-            ? Categories.Select(CloneCategory).ToArray()
+            ? categories.Select(CloneCategory).ToArray()
             : Array.Empty<Category>();
 
         return _importExportService.ExportJson(exportPasswords, exportSecureItems, exportCategories);
     }
 
-    private string BuildTotpCsvExport()
+    private async Task<string> BuildTotpCsvExportAsync()
     {
-        var exportTotps = TotpItems
+        var exportTotps = BuildStoredAndVirtualTotpItems(
+                await _repository.GetPasswordsAsync(),
+                await _repository.GetSecureItemsAsync(VaultItemType.Totp))
             .Select(item => CloneSecureItemForExport(item))
             .ToArray();
 
         return _importExportService.ExportTotpCsv(exportTotps);
     }
 
-    private string BuildNoteCsvExport()
+    private async Task<string> BuildNoteCsvExportAsync()
     {
-        var exportNotes = NoteItems
+        var exportNotes = (await _repository.GetSecureItemsAsync(VaultItemType.Note))
             .Select(item => CloneSecureItemForExport(item))
             .ToArray();
 
         return _importExportService.ExportNoteCsv(exportNotes);
     }
 
-    private string BuildWalletCsvExport()
+    private async Task<string> BuildWalletCsvExportAsync()
     {
-        var exportWalletItems = WalletItems
+        var exportWalletItems = (await _repository.GetSecureItemsAsync())
+            .Where(item => item.ItemType is VaultItemType.BankCard or VaultItemType.Document)
             .Select(item => CloneSecureItemForExport(item))
             .ToArray();
 
         return _importExportService.ExportWalletCsv(exportWalletItems);
     }
 
-    private string BuildAegisJsonExport()
+    private async Task<string> BuildAegisJsonExportAsync()
     {
-        var exportTotps = TotpItems
+        var exportTotps = BuildStoredAndVirtualTotpItems(
+                await _repository.GetPasswordsAsync(),
+                await _repository.GetSecureItemsAsync(VaultItemType.Totp))
             .Select(item => CloneSecureItemForExport(item))
             .ToArray();
 
         return _importExportService.ExportAegisJson(exportTotps);
+    }
+
+    private static IReadOnlyList<SecureItem> BuildStoredAndVirtualTotpItems(
+        IEnumerable<PasswordEntry> passwords,
+        IEnumerable<SecureItem> secureItems)
+    {
+        var activePasswords = passwords.ToArray();
+        var activePasswordIds = activePasswords.Select(item => item.Id).ToHashSet();
+        var seenVirtualPasswordIds = new HashSet<long>();
+        var result = new List<SecureItem>();
+
+        foreach (var item in secureItems.Where(item => item.ItemType == VaultItemType.Totp))
+        {
+            if (item.BoundPasswordId is { } boundPasswordId && !activePasswordIds.Contains(boundPasswordId))
+            {
+                continue;
+            }
+
+            result.Add(item);
+            if (item.BoundPasswordId is { } passwordId)
+            {
+                seenVirtualPasswordIds.Add(passwordId);
+            }
+        }
+
+        foreach (var password in activePasswords.Where(item => item.HasAuthenticator && !seenVirtualPasswordIds.Contains(item.Id)))
+        {
+            result.Add(BuildVirtualTotpItem(password));
+        }
+
+        return result;
     }
 
     private async Task<MonicaJsonImportResult> ImportMonicaJsonAsync(string json)

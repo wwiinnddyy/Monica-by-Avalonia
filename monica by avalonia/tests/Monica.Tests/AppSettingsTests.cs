@@ -460,13 +460,8 @@ public sealed class AppSettingsTests
             GetTempPath(),
             platformIntegrationService: integration,
             fileSystemPickerService: filePicker);
-        viewModel.Passwords.Add(new PasswordEntry
-        {
-            Title = "CSV export login",
-            Website = "https://example.com",
-            Username = "dev",
-            Password = "plain-secret"
-        });
+        viewModel.ImportCsvText = "title,website,username,password\r\nCSV export login,https://example.com,dev,plain-secret";
+        await viewModel.ImportPasswordCsvCommand.ExecuteAsync(null);
 
         await viewModel.SavePasswordCsvExportCommand.ExecuteAsync(null);
 
@@ -489,13 +484,17 @@ public sealed class AppSettingsTests
             GetTempPath(),
             platformIntegrationService: integration,
             fileSystemPickerService: filePicker);
-        viewModel.TotpItems.Add(new SecureItem
-        {
-            Title = "GitHub",
-            Notes = "work account",
-            ItemType = VaultItemType.Totp,
-            ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "dev@example.com"))
-        });
+        viewModel.ImportTotpCsvText = new ImportExportService().ExportTotpCsv(
+        [
+            new SecureItem
+            {
+                Title = "GitHub",
+                Notes = "work account",
+                ItemType = VaultItemType.Totp,
+                ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "dev@example.com"))
+            }
+        ]);
+        await viewModel.ImportTotpCsvCommand.ExecuteAsync(null);
 
         await viewModel.SaveTotpCsvExportCommand.ExecuteAsync(null);
 
@@ -520,14 +519,18 @@ public sealed class AppSettingsTests
             platformIntegrationService: integration,
             fileSystemPickerService: filePicker);
         var payload = NoteContentCodec.BuildSavePayload("Recovery", "# backup codes\nalpha", "ops", true, ["inline.png"]);
-        viewModel.NoteItems.Add(new SecureItem
-        {
-            Title = payload.Title,
-            Notes = payload.NotesCache,
-            ImagePaths = payload.ImagePaths,
-            ItemType = VaultItemType.Note,
-            ItemData = payload.ItemData
-        });
+        viewModel.ImportNoteCsvText = new ImportExportService().ExportNoteCsv(
+        [
+            new SecureItem
+            {
+                Title = payload.Title,
+                Notes = payload.NotesCache,
+                ImagePaths = payload.ImagePaths,
+                ItemType = VaultItemType.Note,
+                ItemData = payload.ItemData
+            }
+        ]);
+        await viewModel.ImportNoteCsvCommand.ExecuteAsync(null);
 
         await viewModel.SaveNoteCsvExportCommand.ExecuteAsync(null);
 
@@ -552,13 +555,17 @@ public sealed class AppSettingsTests
             GetTempPath(),
             platformIntegrationService: integration,
             fileSystemPickerService: filePicker);
-        viewModel.TotpItems.Add(new SecureItem
-        {
-            Title = "GitHub",
-            Notes = "work account",
-            ItemType = VaultItemType.Totp,
-            ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "dev@example.com"))
-        });
+        viewModel.ImportAegisJsonText = new ImportExportService().ExportAegisJson(
+        [
+            new SecureItem
+            {
+                Title = "GitHub",
+                Notes = "work account",
+                ItemType = VaultItemType.Totp,
+                ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "dev@example.com"))
+            }
+        ]);
+        await viewModel.ImportAegisJsonCommand.ExecuteAsync(null);
 
         await viewModel.SaveAegisJsonExportCommand.ExecuteAsync(null);
 

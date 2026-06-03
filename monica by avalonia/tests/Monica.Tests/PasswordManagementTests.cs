@@ -1148,6 +1148,40 @@ public sealed class PasswordManagementTests
     }
 
     [Fact]
+    public async Task ViewModel_creates_webdav_backup_from_repository_snapshot()
+    {
+        var webDav = new FakeWebDavBackupService();
+        var harness = CreateHarness(webDavBackupService: webDav);
+        harness.Crypto.InitializeSession("source password", new byte[16]);
+        var entry = new PasswordEntry
+        {
+            Title = "Cached Portal",
+            Username = "dev",
+            Password = harness.Crypto.EncryptString("cached-secret")
+        };
+        await harness.Repository.SavePasswordAsync(entry);
+        await harness.ViewModel.LoadAsync();
+
+        entry.Title = "Fresh Portal";
+        entry.Password = harness.Crypto.EncryptString("fresh-secret");
+        await harness.Repository.SavePasswordAsync(entry);
+        harness.ViewModel.WebDavEnabled = true;
+        harness.ViewModel.WebDavServerUrl = "https://dav.example.com/";
+        harness.ViewModel.WebDavBackupIncludeTotp = false;
+        harness.ViewModel.WebDavBackupIncludeNotes = false;
+        harness.ViewModel.WebDavBackupIncludeCards = false;
+        harness.ViewModel.WebDavBackupIncludeDocuments = false;
+        harness.ViewModel.WebDavBackupIncludeCategories = false;
+
+        await harness.ViewModel.CreateWebDavBackupCommand.ExecuteAsync(null);
+
+        Assert.Contains("Fresh Portal", webDav.UploadedContent);
+        Assert.Contains("fresh-secret", webDav.UploadedContent);
+        Assert.DoesNotContain("Cached Portal", webDav.UploadedContent);
+        Assert.DoesNotContain("cached-secret", webDav.UploadedContent);
+    }
+
+    [Fact]
     public async Task ViewModel_restores_webdav_backup_and_rebinds_categories()
     {
         var sourceWebDav = new FakeWebDavBackupService();
@@ -1786,7 +1820,7 @@ public sealed class PasswordManagementTests
             ItemData = """{"secret":"JBSWY3DPEHPK3PXP","period":30,"digits":6,"otpType":"TOTP"}"""
         });
         await source.ViewModel.LoadAsync();
-        source.ViewModel.ExportDataCommand.Execute(null);
+        await source.ViewModel.ExportDataCommand.ExecuteAsync(null);
 
         var target = CreateHarness();
         target.Crypto.InitializeSession("target password", new byte[16]);
@@ -1869,11 +1903,44 @@ public sealed class PasswordManagementTests
         });
         await harness.ViewModel.LoadAsync();
 
-        harness.ViewModel.ExportPasswordCsvCommand.Execute(null);
+        await harness.ViewModel.ExportPasswordCsvCommand.ExecuteAsync(null);
 
         Assert.Contains("plain-export-secret", harness.ViewModel.ExportCsvPreview);
         Assert.Contains("JBSWY3DPEHPK3PXP", harness.ViewModel.ExportCsvPreview);
         Assert.Equal(harness.ViewModel.L.Get("ExportedPasswordCsv"), harness.ViewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task ViewModel_exports_from_repository_snapshot()
+    {
+        var harness = CreateHarness();
+        harness.Crypto.InitializeSession("source password", new byte[16]);
+        var entry = new PasswordEntry
+        {
+            Title = "Cached Export",
+            Website = "https://cached.example.com",
+            Username = "dev",
+            Password = harness.Crypto.EncryptString("cached-export-secret")
+        };
+        await harness.Repository.SavePasswordAsync(entry);
+        await harness.ViewModel.LoadAsync();
+
+        entry.Title = "Fresh Export";
+        entry.Website = "https://fresh.example.com";
+        entry.Password = harness.Crypto.EncryptString("fresh-export-secret");
+        await harness.Repository.SavePasswordAsync(entry);
+
+        await harness.ViewModel.ExportDataCommand.ExecuteAsync(null);
+        await harness.ViewModel.ExportPasswordCsvCommand.ExecuteAsync(null);
+
+        Assert.Contains("Fresh Export", harness.ViewModel.ExportPreview);
+        Assert.Contains("fresh-export-secret", harness.ViewModel.ExportPreview);
+        Assert.DoesNotContain("Cached Export", harness.ViewModel.ExportPreview);
+        Assert.DoesNotContain("cached-export-secret", harness.ViewModel.ExportPreview);
+        Assert.Contains("https://fresh.example.com", harness.ViewModel.ExportCsvPreview);
+        Assert.Contains("fresh-export-secret", harness.ViewModel.ExportCsvPreview);
+        Assert.DoesNotContain("https://cached.example.com", harness.ViewModel.ExportCsvPreview);
+        Assert.DoesNotContain("cached-export-secret", harness.ViewModel.ExportCsvPreview);
     }
 
     private static PasswordHarness CreateHarness(IPwnedPasswordService? pwnedPasswordService = null, IWebDavBackupService? webDavBackupService = null)
