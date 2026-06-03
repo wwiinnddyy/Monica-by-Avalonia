@@ -1570,6 +1570,38 @@ public sealed class MdbxRepositoryTests
     }
 
     [Fact]
+    public async Task Repository_clears_password_scope_and_detaches_mdbx_only_bound_totp()
+    {
+        var repository = CreateRepository(out var bridge, out var sqliteRepository);
+        var database = await SaveDefaultMdbxDatabaseAsync(repository);
+        var password = new PasswordEntry
+        {
+            Title = "Portal",
+            Username = "dev",
+            Password = "secret"
+        };
+        await repository.SavePasswordAsync(password);
+        var boundTotp = new SecureItem
+        {
+            ItemType = VaultItemType.Totp,
+            Title = "Portal OTP",
+            ItemData = """{"secret":"JBSWY3DPEHPK3PXP"}""",
+            BoundPasswordId = password.Id
+        };
+        await repository.SaveSecureItemAsync(boundTotp);
+        await sqliteRepository.ClearVaultDataAsync(VaultClearScope.SecureItems);
+
+        await repository.ClearVaultDataAsync(VaultClearScope.Passwords);
+
+        Assert.Empty(await repository.GetPasswordsAsync());
+        var remaining = Assert.Single(await repository.GetSecureItemsAsync(VaultItemType.Totp));
+        Assert.Equal(boundTotp.Id, remaining.Id);
+        Assert.Null(remaining.BoundPasswordId);
+        Assert.Equal(1, bridge.CountActiveEntries(database.WorkingCopyPath!));
+        Assert.Equal(1, bridge.CountDeletedEntries(database.WorkingCopyPath!));
+    }
+
+    [Fact]
     public async Task Repository_clears_secure_item_scope_from_mdbx_without_rehydrating_entries()
     {
         var repository = CreateRepository(out var bridge);
