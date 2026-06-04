@@ -16,6 +16,11 @@ on:
           - both
           - jit
           - aot
+      include_mobile:
+        description: Build mobile packages too, Android APK and iOS IPA
+        required: true
+        default: false
+        type: boolean
       draft:
         description: Create the GitHub release as a draft
         required: true
@@ -259,6 +264,7 @@ jobs:
   android:
     name: Android APK ${{ matrix.mode }}
     needs: version
+    if: ${{ inputs.include_mobile }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -303,6 +309,7 @@ jobs:
   ios:
     name: iOS IPA ${{ matrix.mode }}
     needs: version
+    if: ${{ inputs.include_mobile }}
     runs-on: macos-14
     strategy:
       fail-fast: false
@@ -354,6 +361,7 @@ jobs:
       - android
       - ios
     runs-on: ubuntu-latest
+    if: ${{ always() && needs.version.result == 'success' && needs.windows.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' && (inputs.include_mobile == false || (needs.android.result == 'success' && needs.ios.result == 'success')) }}
 
     steps:
       - name: Download release artifacts
