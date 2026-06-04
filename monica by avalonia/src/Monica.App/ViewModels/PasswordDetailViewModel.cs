@@ -306,7 +306,7 @@ public sealed partial class PasswordDetailViewModel : ObservableObject
             var code = totpService.GenerateCode(totpData.Secret, totpData.Period, totpData.Digits, totpData.OtpType, totpData.Counter);
             AddGroup(groups, localization.Get("SecurityVerification"), true,
                 Field(localization.Get("TotpCode"), code),
-                Field(localization.Get("RemainingTime"), $"{totpService.GetRemainingSeconds(totpData.Period)}s", canCopy: false),
+                Field(localization.Get("RemainingTime"), localization.Format("SecondFormat", totpService.GetRemainingSeconds(totpData.Period)), canCopy: false),
                 Field(localization.Get("Issuer"), totpData.Issuer),
                 Field(localization.Get("Account"), totpData.AccountName),
                 Field(localization.Get("TotpSecret"), totpData.Secret, isSensitive: true),
@@ -360,12 +360,12 @@ public sealed partial class PasswordDetailViewModel : ObservableObject
                 .ToArray());
 
         AddGroup(groups, localization.Get("SourceMetadata"), false,
-            Field("Bitwarden vault", entry.BitwardenVaultId?.ToString() ?? ""),
-            Field("Bitwarden cipher", entry.BitwardenCipherId ?? ""),
-            Field("KeePass database", entry.KeepassDatabaseId?.ToString() ?? ""),
-            Field("KeePass group", entry.KeepassGroupPath ?? ""),
-            Field("MDBX database", entry.MdbxDatabaseId?.ToString() ?? ""),
-            Field("MDBX folder", entry.MdbxFolderId ?? ""),
+            Field(localization.Get("BitwardenVault"), entry.BitwardenVaultId?.ToString() ?? ""),
+            Field(localization.Get("BitwardenCipher"), entry.BitwardenCipherId ?? ""),
+            Field(localization.Get("KeePassDatabase"), entry.KeepassDatabaseId?.ToString() ?? ""),
+            Field(localization.Get("KeePassGroup"), entry.KeepassGroupPath ?? ""),
+            Field(localization.Get("MdbxDatabase"), entry.MdbxDatabaseId?.ToString() ?? ""),
+            Field(localization.Get("MdbxFolder"), entry.MdbxFolderId ?? ""),
             Field(localization.Get("CreatedAt"), entry.CreatedAt.ToString("g", localization.Culture), canCopy: false),
             Field(localization.Get("UpdatedAt"), entry.UpdatedAt.ToString("g", localization.Culture), canCopy: false));
 

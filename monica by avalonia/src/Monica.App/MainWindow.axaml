@@ -25,21 +25,27 @@
         <SolidColorBrush x:Key="MutedTextBrush" Color="#9D9D9D" />
     </Window.Resources>
 
-    <Grid RowDefinitions="32,*,24" Background="{DynamicResource LayerFillColorDefaultBrush}">
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,*" Background="{DynamicResource LayerFillColorDefaultBrush}">
-            <Image Source="/Assets/Logo.png"
-                   Width="16"
-                   Height="16"
-                   Margin="16,0,16,0"
-                   VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1"
-                       Text="Monica"
-                       VerticalAlignment="Center"
-                       FontSize="12"
-                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-        </Grid>
+    <Window.Styles>
+        <Style Selector="Border.noteTab">
+            <Setter Property="Background" Value="{DynamicResource LayerFillColorSubtleBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+        </Style>
+        <Style Selector="Border.noteTab.active">
+            <Setter Property="Background" Value="{DynamicResource LayerFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+        </Style>
+        <Style Selector="Button.noteTabButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        </Style>
+    </Window.Styles>
 
-        <Grid Grid.Row="1">
+    <Grid RowDefinitions="*,24" Background="{DynamicResource LayerFillColorDefaultBrush}">
+        <Grid Grid.Row="0">
             <Grid IsVisible="{Binding !IsUnlocked}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                 <StackPanel Width="360" Spacing="16" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <ic:FluentIcon Icon="LockClosed" FontSize="48" HorizontalAlignment="Center" />
@@ -142,7 +148,7 @@
                 </fa:FANavigationView.FooterMenuItems>
 
                 <Grid Margin="18" RowDefinitions="Auto,*">
-                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,18">
+                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,18" IsVisible="{Binding SelectedSection, Converter={x:Static local:StringConverters.IsContentHeaderVisible}}">
                         <StackPanel>
                             <TextBlock Text="{Binding SelectedSectionTitle}" FontSize="24" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding StatusMessage}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -347,63 +353,54 @@
                                 </StackPanel>
                             </ScrollViewer>
 
-                            <ListBox Grid.Row="4" ItemsSource="{Binding FilteredPasswords}" SelectionMode="Multiple">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="models:PasswordEntry">
-                                        <Border Margin="0,0,0,8" Padding="{Binding #Root.DataContext.PasswordListCardPadding}" CornerRadius="8" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Background="{DynamicResource CardBackgroundBrush}">
-                                            <Grid ColumnDefinitions="Auto,Auto,*,Auto" MinHeight="{Binding #Root.DataContext.PasswordListRowMinHeight}">
-                                                <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                                <Border Grid.Column="1" Width="{Binding #Root.DataContext.PasswordListAvatarSize}" Height="{Binding #Root.DataContext.PasswordListAvatarSize}" CornerRadius="{Binding #Root.DataContext.PasswordListAvatarCornerRadius}" Background="#2F7DFF">
-                                                    <TextBlock Text="{Binding AvatarText}" Foreground="White" FontWeight="SemiBold" FontSize="{Binding #Root.DataContext.PasswordListAvatarFontSize}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Grid Grid.Row="4" ColumnDefinitions="380,*" ColumnSpacing="14">
+                                <Border BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="8" Background="{DynamicResource CardBackgroundBrush}">
+                                    <ListBox ItemsSource="{Binding FilteredPasswords}"
+                                             SelectedItem="{Binding SelectedPassword}"
+                                             SelectionMode="Single"
+                                             Padding="6"
+                                             Background="Transparent">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="models:PasswordEntry">
+                                                <Border Margin="0,0,0,6" Padding="10" CornerRadius="6" Background="{DynamicResource LayerFillColorSubtleBrush}">
+                                                    <Grid ColumnDefinitions="Auto,Auto,*" MinHeight="52">
+                                                        <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                        <Border Grid.Column="1" Width="38" Height="38" CornerRadius="19" Background="#2F7DFF">
+                                                            <TextBlock Text="{Binding AvatarText}" Foreground="White" FontWeight="SemiBold" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        </Border>
+                                                        <StackPanel Grid.Column="2" Margin="10,0,0,0" VerticalAlignment="Center">
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                <ic:FluentIcon Icon="Star" FontSize="14" IsVisible="{Binding IsFavorite}" />
+                                                                <ic:FluentIcon Icon="Attach" FontSize="14" IsVisible="{Binding HasAttachments}" />
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                                <TextBlock Text="{Binding Website}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5" IsVisible="{Binding HasAuthenticator}">
+                                                                    <TextBlock Text="{Binding TotpCode}" FontFamily="Consolas" FontWeight="SemiBold" FontSize="12" />
+                                                                    <TextBlock Text="{Binding TotpTimeRemaining}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </StackPanel>
+                                                    </Grid>
                                                 </Border>
-                                                <StackPanel Grid.Column="2" Margin="{Binding #Root.DataContext.PasswordListContentMargin}" VerticalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                        <ic:FluentIcon Icon="Star" FontSize="16" IsVisible="{Binding IsFavorite}" />
-                                                        <ic:FluentIcon Icon="Attach" FontSize="16" IsVisible="{Binding HasAttachments}" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding Username}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                    <TextBlock Text="{Binding Website}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12" IsVisible="{Binding #Root.DataContext.ShowPasswordListDetails}" />
-                                                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0" IsVisible="{Binding HasAuthenticator}">
-                                                        <ProgressBar Width="44" Height="6" Value="{Binding TotpProgress}" Minimum="0" Maximum="100" VerticalAlignment="Center" />
-                                                        <TextBlock Text="{Binding TotpCode}" FontFamily="Consolas" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding TotpTimeRemaining}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                    </StackPanel>
-                                                </StackPanel>
-                                                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                                    <Button Command="{Binding #Root.DataContext.ShowPasswordDetailsCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.PasswordDetails}">
-                                                        <ic:FluentIcon Icon="Info" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.CopyUsernameCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.CopyUsername}">
-                                                        <ic:FluentIcon Icon="Person" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.CopyPasswordTotpCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.CopyCode}" IsVisible="{Binding HasAuthenticator}">
-                                                        <ic:FluentIcon Icon="Key" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.EditPasswordCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.EditPassword}">
-                                                        <ic:FluentIcon Icon="Edit" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.CopyPasswordCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.CopyPassword}">
-                                                        <ic:FluentIcon Icon="Copy" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.AddPasswordAttachmentCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.AddAttachment}">
-                                                        <ic:FluentIcon Icon="Attach" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.ToggleFavoriteCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.Favorite}">
-                                                        <ic:FluentIcon Icon="Star" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.ArchivePasswordCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.ArchivePassword}">
-                                                        <ic:FluentIcon Icon="Archive" FontSize="18" />
-                                                    </Button>
-                                                    <Button Command="{Binding #Root.DataContext.DeletePasswordCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.MoveToRecycleBin}">
-                                                        <ic:FluentIcon Icon="Delete" FontSize="18" />
-                                                    </Button>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+
+                                <Border Grid.Column="1" Padding="16" CornerRadius="8" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Background="{DynamicResource CardBackgroundBrush}">
+                                    <Grid>
+                                        <StackPanel IsVisible="{Binding #Root.DataContext.HasSelectedPasswordDetails, Converter={x:Static local:BoolConverters.Not}}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                                            <ic:FluentIcon Icon="Info" FontSize="32" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding L.PasswordDetails}" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                            <TextBlock Text="{Binding PasswordCountText}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                        <local:PasswordDetailDialog DataContext="{Binding SelectedPasswordDetails}" IsVisible="{Binding #Root.DataContext.HasSelectedPasswordDetails}" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
                         </Grid>
 
                         <Grid IsVisible="{Binding SelectedSection, Converter={x:Static local:StringConverters.IsArchive}}" RowDefinitions="Auto,*">
@@ -2079,71 +2076,487 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <Grid IsVisible="{Binding SelectedSection, Converter={x:Static local:StringConverters.IsNotes}}" RowDefinitions="Auto,*">
-                            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,16">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding L.SecureNotes}" FontSize="20" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding NoteCountText}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                                <Button Grid.Column="1" Command="{Binding AddNoteCommand}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <ic:FluentIcon Icon="Note" FontSize="20" />
-                                        <TextBlock Text="{Binding L.NewSecureNote}" />
-                                    </StackPanel>
-                                </Button>
-                            </Grid>
+                        <Grid IsVisible="{Binding SelectedSection, Converter={x:Static local:StringConverters.IsNotes}}" RowDefinitions="44,*" Background="{DynamicResource LayerFillColorDefaultBrush}">
+                            <Border BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,0,1" Background="{DynamicResource LayerFillColorDefaultBrush}">
+                                <Grid ColumnDefinitions="280,*" Height="44">
+                                    <Border Padding="14,0" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,1,0">
+                                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                            <ic:FluentIcon Icon="Folder" FontSize="17" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{Binding L.SecureNotes}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding NoteCountText}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Border>
 
-                            <Grid Grid.Row="1" ColumnDefinitions="320,*" ColumnSpacing="16">
-                                <ListBox ItemsSource="{Binding NoteItems}" SelectedItem="{Binding SelectedNote}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate x:DataType="models:SecureItem">
-                                            <Border Margin="0,0,0,8" Padding="14" CornerRadius="8" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Background="{DynamicResource CardBackgroundBrush}">
-                                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
-                                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
-                                                        <ic:FluentIcon Icon="Star" FontSize="16" IsVisible="{Binding IsFavorite}" />
-                                                    </StackPanel>
-                                                    <Button Grid.Column="1" Grid.RowSpan="3" Command="{Binding #Root.DataContext.DeleteNoteCommand}" CommandParameter="{Binding}" ToolTip.Tip="{Binding #Root.DataContext.L.MoveToRecycleBin}">
-                                                        <ic:FluentIcon Icon="Delete" FontSize="18" />
-                                                    </Button>
-                                                    <TextBlock Grid.Row="1" Text="{Binding Notes}" TextWrapping="Wrap" MaxLines="3" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                    <TextBlock Grid.Row="2" Text="{Binding UpdatedAt, StringFormat='{}{0:g}'}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-
-                                <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" RowSpacing="12">
-                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
-                                        <TextBox Text="{Binding NoteTitle}" PlaceholderText="{Binding L.NoteTitleWatermark}" />
-                                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding NoteIsMarkdown}" OffContent="{Binding L.PlainText}" OnContent="Markdown" />
-                                        <ToggleSwitch Grid.Column="2" IsChecked="{Binding NotePreviewMode}" OffContent="{Binding L.Edit}" OnContent="{Binding L.Preview}" />
-                                        <Button Grid.Column="3" Command="{Binding ToggleNoteFavoriteCommand}" ToolTip.Tip="{Binding L.Favorite}">
-                                            <ic:FluentIcon Icon="Star" FontSize="18" />
+                                    <Grid Grid.Column="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto" Background="{DynamicResource LayerFillColorSubtleBrush}">
+                                        <Button Click="PreviousNoteTabButton_OnClick"
+                                                ToolTip.Tip="向左滚动标签"
+                                                Width="30"
+                                                Height="34"
+                                                Padding="0"
+                                                Margin="8,5,2,0"
+                                                VerticalAlignment="Top">
+                                            <ic:FluentIcon Icon="ChevronLeft" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Button>
-                                    </Grid>
 
-                                    <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                        <TextBox Text="{Binding NoteTagsText}" PlaceholderText="{Binding L.NoteTagsWatermark}" />
-                                        <Button Grid.Column="1" Command="{Binding SaveNoteCommand}">
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <ic:FluentIcon Icon="Save" FontSize="20" />
-                                                <TextBlock Text="{Binding L.SaveNote}" />
+                                        <ScrollViewer x:Name="NoteTabsScrollViewer"
+                                                      Grid.Column="1"
+                                                      Height="44"
+                                                      MaxHeight="44"
+                                                      ClipToBounds="True"
+                                                      SizeChanged="NoteTabsScrollViewer_OnSizeChanged"
+                                                      HorizontalScrollBarVisibility="Hidden"
+                                                      VerticalScrollBarVisibility="Hidden">
+                                            <ItemsControl ItemsSource="{Binding OpenNoteTabs}"
+                                                          Height="40"
+                                                          Margin="4,4,4,0"
+                                                          HorizontalAlignment="Left">
+                                                <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:NoteEditorTab">
+                                                        <Border Classes="noteTab"
+                                                                Classes.active="{Binding IsSelected}"
+                                                                Width="{Binding #Root.DataContext.NoteTabWidth}"
+                                                                MinWidth="92"
+                                                                MaxWidth="156"
+                                                                Height="34"
+                                                                Margin="0,4,4,0"
+                                                                BorderThickness="1,1,1,0"
+                                                                CornerRadius="4,4,0,0">
+                                                            <Grid RowDefinitions="3,*">
+                                                                <Border IsVisible="{Binding IsSelected}" Background="{DynamicResource AccentFillColorDefaultBrush}" CornerRadius="4,4,0,0" />
+                                                                <Grid Grid.Row="1" ColumnDefinitions="*,Auto" MinWidth="0">
+                                                                    <Button Classes="noteTabButton"
+                                                                            Command="{Binding #Root.DataContext.SelectNoteTabCommand}"
+                                                                            CommandParameter="{Binding}"
+                                                                            ToolTip.Tip="{Binding Title}">
+                                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5" Margin="10,0,6,0" MinWidth="0">
+                                                                            <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                            <TextBlock Grid.Column="1" Text="*" IsVisible="{Binding IsDirty}" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                                                                        </Grid>
+                                                                    </Button>
+                                                                    <Button Grid.Column="1"
+                                                                            Click="CloseNoteTabButton_OnClick"
+                                                                            IsVisible="{Binding IsSelected}"
+                                                                            ToolTip.Tip="关闭标签"
+                                                                            Width="24"
+                                                                            Height="24"
+                                                                            Padding="0"
+                                                                            Margin="0,2,5,0"
+                                                                            VerticalAlignment="Top">
+                                                                        <ic:FluentIcon Icon="Dismiss" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Button>
+                                                                </Grid>
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+
+                                        <Button Grid.Column="2"
+                                                Click="NextNoteTabButton_OnClick"
+                                                ToolTip.Tip="向右滚动标签"
+                                                Width="30"
+                                                Height="34"
+                                                Padding="0"
+                                                Margin="2,5,4,0"
+                                                VerticalAlignment="Top">
+                                            <ic:FluentIcon Icon="ChevronRight" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Button>
+
+                                        <Button Grid.Column="3" Command="{Binding AddNoteCommand}" ToolTip.Tip="{Binding L.NewSecureNote}" Width="34" Height="34" Padding="0" Margin="0,5,8,0" VerticalAlignment="Top">
+                                            <ic:FluentIcon Icon="Add" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Button>
+
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Margin="0,0,10,0" VerticalAlignment="Center">
+                                            <Button Command="{Binding SaveNoteCommand}" ToolTip.Tip="{Binding L.SaveNote}" Width="34" Height="34" Padding="0">
+                                                <ic:FluentIcon Icon="Save" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                            <Button Command="{Binding SaveAllNoteTabsCommand}" ToolTip.Tip="保存全部" Width="34" Height="34" Padding="0">
+                                                <TextBlock Text="All" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                            <Button Command="{Binding ImportMarkdownNoteCommand}" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="导入 Markdown" Width="34" Height="34" Padding="0">
+                                                <ic:FluentIcon Icon="ArrowUpload" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                            <Button Command="{Binding ExportCurrentNoteMarkdownCommand}" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="导出 Markdown" Width="34" Height="34" Padding="0">
+                                                <ic:FluentIcon Icon="ArrowDownload" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                            <Button Command="{Binding ToggleNoteFavoriteCommand}" ToolTip.Tip="{Binding L.Favorite}" Width="34" Height="34" Padding="0">
+                                                <ic:FluentIcon Icon="Star" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="1" ColumnDefinitions="280,*,260">
+                                <Border BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,1,0" Background="{DynamicResource LayerFillColorDefaultBrush}">
+                                    <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="12">
+                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6" Margin="0,0,0,10">
+                                            <TextBlock Text="保险库" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                            <Button Grid.Column="1" Command="{Binding AddNoteCommand}" ToolTip.Tip="{Binding L.NewSecureNote}" Width="32" Height="32" Padding="0">
+                                                <ic:FluentIcon Icon="Add" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                            <Button Grid.Column="2" Command="{Binding LoadCommand}" ToolTip.Tip="{Binding L.Refresh}" Width="32" Height="32" Padding="0">
+                                                <ic:FluentIcon Icon="ArrowSync" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Button>
+                                        </Grid>
+
+                                        <TextBox Grid.Row="1"
+                                                 Text="{Binding NoteSearchText}"
+                                                 PlaceholderText="搜索笔记、标签、正文"
+                                                 Height="32"
+                                                 Margin="0,0,0,10" />
+
+                                        <Border Grid.Row="2" Padding="10,8" CornerRadius="6" Background="{DynamicResource LayerFillColorSubtleBrush}" Margin="0,0,0,10">
+                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                <ic:FluentIcon Icon="Home" FontSize="16" VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="主页" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding NoteTreeStatusText}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+
+                                        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                            <StackPanel Spacing="10">
+                                                <StackPanel IsVisible="{Binding HasFavoriteNoteItems}">
+                                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6" Margin="2,0,0,6">
+                                                        <ic:FluentIcon Icon="ChevronDown" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7">
+                                                            <ic:FluentIcon Icon="Star" FontSize="14" VerticalAlignment="Center" />
+                                                            <TextBlock Text="收藏" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="2" Text="{Binding FavoriteNoteCount}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                    </Grid>
+
+                                                    <ItemsControl ItemsSource="{Binding FavoriteNoteItems}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="models:SecureItem">
+                                                                <Grid ColumnDefinitions="*,Auto" Margin="14,0,0,3">
+                                                                    <Button Command="{Binding #Root.DataContext.OpenNoteCommand}"
+                                                                            CommandParameter="{Binding}"
+                                                                            Padding="0"
+                                                                            Background="Transparent"
+                                                                            BorderThickness="0"
+                                                                            HorizontalContentAlignment="Stretch">
+                                                                        <Border Padding="8,6" CornerRadius="5" Background="Transparent">
+                                                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                                                <ic:FluentIcon Icon="Document" FontSize="15" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                                                                <StackPanel Grid.Column="1" Spacing="2">
+                                                                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                                                                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                                        <TextBlock Text=".md" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                                        <ic:FluentIcon Icon="Star" FontSize="12" IsVisible="{Binding IsFavorite}" />
+                                                                                    </StackPanel>
+                                                                                    <TextBlock Text="{Binding Notes}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxLines="2" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                                </StackPanel>
+                                                                            </Grid>
+                                                                        </Border>
+                                                                    </Button>
+                                                                    <Button Grid.Column="1"
+                                                                            Command="{Binding #Root.DataContext.DeleteNoteCommand}"
+                                                                            CommandParameter="{Binding}"
+                                                                            ToolTip.Tip="{Binding #Root.DataContext.L.MoveToRecycleBin}"
+                                                                            Width="28"
+                                                                            Height="28"
+                                                                            Padding="0"
+                                                                            VerticalAlignment="Top">
+                                                                        <ic:FluentIcon Icon="Delete" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Button>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+
+                                                <StackPanel>
+                                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6" Margin="2,0,0,6">
+                                                        <ic:FluentIcon Icon="ChevronDown" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="7">
+                                                            <ic:FluentIcon Icon="FolderOpen" FontSize="14" VerticalAlignment="Center" />
+                                                            <TextBlock Text="全部笔记" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="2" Text="{Binding FilteredNoteItems.Count}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                    </Grid>
+
+                                                    <ItemsControl ItemsSource="{Binding FilteredNoteItems}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="models:SecureItem">
+                                                                <Grid ColumnDefinitions="*,Auto" Margin="14,0,0,3">
+                                                                    <Button Command="{Binding #Root.DataContext.OpenNoteCommand}"
+                                                                            CommandParameter="{Binding}"
+                                                                            Padding="0"
+                                                                            Background="Transparent"
+                                                                            BorderThickness="0"
+                                                                            HorizontalContentAlignment="Stretch">
+                                                                        <Border Padding="8,6" CornerRadius="5" Background="Transparent">
+                                                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                                                <ic:FluentIcon Icon="Document" FontSize="15" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                                                                <StackPanel Grid.Column="1" Spacing="2">
+                                                                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                                                                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                                        <TextBlock Text=".md" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                                        <ic:FluentIcon Icon="Star" FontSize="12" IsVisible="{Binding IsFavorite}" />
+                                                                                    </StackPanel>
+                                                                                    <TextBlock Text="{Binding Notes}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxLines="2" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                                </StackPanel>
+                                                                            </Grid>
+                                                                        </Border>
+                                                                    </Button>
+                                                                    <Button Grid.Column="1"
+                                                                            Command="{Binding #Root.DataContext.DeleteNoteCommand}"
+                                                                            CommandParameter="{Binding}"
+                                                                            ToolTip.Tip="{Binding #Root.DataContext.L.MoveToRecycleBin}"
+                                                                            Width="28"
+                                                                            Height="28"
+                                                                            Padding="0"
+                                                                            VerticalAlignment="Top">
+                                                                        <ic:FluentIcon Icon="Delete" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Button>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+
+                                                    <TextBlock IsVisible="{Binding HasFilteredNoteItems, Converter={x:Static local:BoolConverters.Not}}"
+                                                               Text="没有匹配的笔记"
+                                                               FontSize="12"
+                                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                               Margin="22,8,0,0" />
+                                                </StackPanel>
                                             </StackPanel>
-                                        </Button>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+
+                                <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="36,24,36,20" MaxWidth="920" HorizontalAlignment="Stretch">
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,16">
+                                        <TextBox Text="{Binding NoteTitle}"
+                                                 PlaceholderText="{Binding L.NoteTitleWatermark}"
+                                                 FontSize="32"
+                                                 FontWeight="SemiBold"
+                                                 BorderThickness="0"
+                                                 Background="Transparent"
+                                                 Padding="0" />
+                                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding NoteIsMarkdown}" OffContent="{Binding L.PlainText}" OnContent="Markdown" VerticalAlignment="Center" />
+                                        <ToggleSwitch Grid.Column="2" IsChecked="{Binding NotePreviewMode}" OffContent="{Binding L.Edit}" OnContent="{Binding L.Preview}" VerticalAlignment="Center" />
+                                        <ToggleSwitch Grid.Column="3" IsChecked="{Binding NoteSplitPreviewMode}" OffContent="单栏" OnContent="分屏" VerticalAlignment="Center" />
                                     </Grid>
 
-                                    <Grid Grid.Row="2">
-                                        <TextBox IsVisible="{Binding !NotePreviewMode}" Text="{Binding NoteContent}" PlaceholderText="{Binding L.NoteContentWatermark}" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" FontFamily="Consolas" />
-                                        <Border IsVisible="{Binding NotePreviewMode}" Padding="14" CornerRadius="8" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Background="{DynamicResource CardBackgroundBrush}">
-                                            <Grid>
+                                    <Border Grid.Row="1" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,12">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <Button Click="UndoNoteEditorButton_OnClick" ToolTip.Tip="撤销" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="ArrowUndo" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Click="RedoNoteEditorButton_OnClick" ToolTip.Tip="重做" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="ArrowRedo" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Border Width="1" Height="20" Background="{DynamicResource CardBorderBrush}" Margin="4,0,6,0" VerticalAlignment="Center" />
+                                            <Button Tag="h1" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="一级标题" Width="32" Height="32" Padding="0"><TextBlock Text="H1" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="h2" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="二级标题" Width="32" Height="32" Padding="0"><TextBlock Text="H2" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="h3" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="三级标题" Width="32" Height="32" Padding="0"><TextBlock Text="H3" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="bold" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="粗体" Width="32" Height="32" Padding="0"><TextBlock Text="B" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="italic" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="斜体" Width="32" Height="32" Padding="0"><TextBlock Text="I" FontStyle="Italic" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="strike" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="删除线" Width="32" Height="32" Padding="0"><TextBlock Text="S" TextDecorations="Strikethrough" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="inlinecode" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="行内代码" Width="32" Height="32" Padding="0"><TextBlock Text="`" FontFamily="Consolas" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="quote" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="引用" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="TextQuote" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="code" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="代码块" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="Code" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="ul" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="无序列表" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="TextBulletList" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="ol" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="有序列表" Width="32" Height="32" Padding="0"><TextBlock Text="1." FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="todo" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="任务列表" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="CheckboxChecked" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="table" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="表格" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="Table" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="link" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="链接" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="Link" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Tag="hr" Click="MarkdownToolbarButton_OnClick" ToolTip.Tip="分割线" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="Subtract" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Click="InsertNoteImageButton_OnClick" IsEnabled="{Binding CanUseFilePicker}" ToolTip.Tip="插入图片" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="Image" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border x:Name="NoteFindPanel" Grid.Row="2" IsVisible="False" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Background="{DynamicResource LayerFillColorSubtleBrush}" Padding="8" Margin="0,0,0,12">
+                                        <Grid ColumnDefinitions="220,220,Auto,Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="6">
+                                            <TextBox x:Name="NoteFindTextBox"
+                                                     PlaceholderText="查找"
+                                                     Height="32"
+                                                     KeyDown="NoteFindTextBox_OnKeyDown"
+                                                     TextChanged="NoteFindTextBox_OnTextChanged" />
+                                            <TextBox x:Name="NoteReplaceTextBox"
+                                                     Grid.Column="1"
+                                                     PlaceholderText="替换为"
+                                                     Height="32"
+                                                     KeyDown="NoteReplaceTextBox_OnKeyDown" />
+                                            <Button Grid.Column="2" Click="FindPreviousNoteMatchButton_OnClick" ToolTip.Tip="上一个" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="ChevronLeft" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Grid.Column="3" Click="FindNextNoteMatchButton_OnClick" ToolTip.Tip="下一个" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="ChevronRight" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <Button Grid.Column="4" Click="ReplaceCurrentNoteMatchButton_OnClick" ToolTip.Tip="替换当前匹配" MinWidth="54" Height="32" Padding="10,0"><TextBlock Text="替换" VerticalAlignment="Center" /></Button>
+                                            <Button Grid.Column="5" Click="ReplaceAllNoteMatchesButton_OnClick" ToolTip.Tip="替换全部匹配" MinWidth="70" Height="32" Padding="10,0"><TextBlock Text="全部替换" VerticalAlignment="Center" /></Button>
+                                            <CheckBox x:Name="NoteFindMatchCaseCheckBox" Grid.Column="6" Content="Aa" ToolTip.Tip="区分大小写" VerticalAlignment="Center" Click="NoteFindOptions_OnChanged" />
+                                            <Button Grid.Column="7" Click="CloseNoteFindPanelButton_OnClick" ToolTip.Tip="关闭查找" Width="32" Height="32" Padding="0"><ic:FluentIcon Icon="Dismiss" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" /></Button>
+                                            <TextBlock x:Name="NoteFindStatusText" Grid.Column="8" Text="0/0" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Grid Grid.Row="3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{Binding NoteEditorColumnWidth}" />
+                                            <ColumnDefinition Width="{Binding NotePreviewSeparatorColumnWidth}" />
+                                            <ColumnDefinition Width="{Binding NotePreviewColumnWidth}" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Grid Grid.Column="0" IsVisible="{Binding IsNoteEditorPaneVisible}" ColumnDefinitions="36,*">
+                                            <Border BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,1,0" Padding="0,0,4,0" Margin="-24,0,10,0">
+                                                <TextBlock Text="{Binding NoteLineNumbersText}" FontFamily="Consolas" FontSize="16" LineHeight="24" TextAlignment="Right" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Opacity="0.65" />
+                                            </Border>
+                                            <TextBox x:Name="NoteContentEditor"
+                                                     Grid.Column="1"
+                                                     Text="{Binding NoteContent}"
+                                                     PlaceholderText="{Binding L.NoteContentWatermark}"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="Wrap"
+                                                     VerticalAlignment="Stretch"
+                                                     VerticalContentAlignment="Top"
+                                                     FontFamily="Consolas"
+                                                     FontSize="16"
+                                                     LineHeight="24"
+                                                     BorderThickness="0"
+                                                     Background="Transparent"
+                                                     Padding="0"
+                                                     KeyDown="NoteContentEditor_OnKeyDown"
+                                                     KeyUp="NoteContentEditor_OnKeyUp"
+                                                     TextChanged="NoteContentEditor_OnTextChanged"
+                                                     PointerReleased="NoteContentEditor_OnPointerReleased">
+                                                <TextBox.Resources>
+                                                    <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBackgroundFocusedPointerOver" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextControlBorderBrushFocusedPointerOver" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextBoxBackground" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextBoxBackgroundPointerOver" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextBoxBackgroundFocused" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextBoxBorderBrush" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextBoxBorderBrushPointerOver" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="TextBoxBorderBrushFocused" Color="Transparent" />
+                                                    <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                                    <Thickness x:Key="TextBoxBorderThemeThickness">0</Thickness>
+                                                </TextBox.Resources>
+                                            </TextBox>
+                                        </Grid>
+                                        <Border Grid.Column="1" IsVisible="{Binding NoteSplitPreviewMode}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1,0,0,0" Margin="8,0,8,0" />
+
+                                        <Border Grid.Column="2" IsVisible="{Binding IsNotePreviewPaneVisible}" Padding="0" Background="Transparent">
+                                            <Grid RowDefinitions="*,Auto">
                                                 <md:MarkdownScrollViewer IsVisible="{Binding NoteIsMarkdown}" Markdown="{Binding NotePreviewMarkdown}" />
-                                                <TextBlock IsVisible="{Binding !NoteIsMarkdown}" Text="{Binding NotePlainPreview}" TextWrapping="Wrap" />
+                                                <ScrollViewer IsVisible="{Binding !NoteIsMarkdown}">
+                                                    <TextBlock Text="{Binding NotePlainPreview}" TextWrapping="Wrap" FontSize="16" LineHeight="24" />
+                                                </ScrollViewer>
+                                                <Border Grid.Row="1" IsVisible="{Binding HasNoteImagePreviewItems}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0" Margin="0,12,0,0" Padding="0,10,0,0">
+                                                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" MaxHeight="190">
+                                                        <ItemsControl ItemsSource="{Binding NoteImagePreviewItems}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <StackPanel Orientation="Horizontal" />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="vm:NoteImagePreviewItem">
+                                                                    <Border Width="172" Height="158" Margin="0,0,10,0" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="6" Background="{DynamicResource CardBackgroundBrush}">
+                                                                        <Grid RowDefinitions="*,Auto" Margin="8">
+                                                                            <Image Source="{Binding Image}" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                            <StackPanel Grid.Row="1" Spacing="1" Margin="0,6,0,0">
+                                                                                <TextBlock Text="{Binding DisplayName}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                                <TextBlock Text="{Binding SizeText}" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                                            </StackPanel>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </ScrollViewer>
+                                                </Border>
                                             </Grid>
                                         </Border>
                                     </Grid>
+
+                                    <Border Grid.Row="4" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,10,0,0">
+                                        <TextBlock Text="{Binding NoteEditorStatusText}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" />
+                                    </Border>
                                 </Grid>
+
+                                <Border Grid.Column="2" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1,0,0,0" Background="{DynamicResource LayerFillColorDefaultBrush}">
+                                    <Grid RowDefinitions="*,*,Auto" Margin="14,16" RowSpacing="14">
+                                        <Grid RowDefinitions="Auto,*">
+                                            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                                                <TextBlock Text="大纲" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding NoteOutlineCount}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            </Grid>
+                                            <Grid Grid.Row="1">
+                                                <TextBlock Text="无标题" IsVisible="{Binding HasNoteOutlineItems, Converter={x:Static local:BoolConverters.Not}}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <ScrollViewer IsVisible="{Binding HasNoteOutlineItems}">
+                                                    <ItemsControl ItemsSource="{Binding NoteOutlineItems}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:NoteOutlineItem">
+                                                                <Button Click="NoteOutlineItem_OnClick" Padding="0" Margin="{Binding Indent}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" ToolTip.Tip="{Binding Title}">
+                                                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                                        <TextBlock Text="{Binding LineNumber}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                    </Grid>
+                                                                </Button>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </ScrollViewer>
+                                            </Grid>
+                                        </Grid>
+
+                                        <Grid Grid.Row="1" RowDefinitions="Auto,*">
+                                            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                                                <TextBlock Text="引用" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding NoteReferenceCount}" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            </Grid>
+                                            <Grid Grid.Row="1">
+                                                <TextBlock Text="无链接" IsVisible="{Binding HasNoteReferenceItems, Converter={x:Static local:BoolConverters.Not}}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <ScrollViewer IsVisible="{Binding HasNoteReferenceItems}">
+                                                    <ItemsControl ItemsSource="{Binding NoteReferenceItems}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:NoteReferenceItem">
+                                                                <Grid RowDefinitions="Auto,Auto" Margin="0,0,0,8">
+                                                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="7">
+                                                                        <ic:FluentIcon Icon="Link" FontSize="12" VerticalAlignment="Center" IsVisible="{Binding IsImage, Converter={x:Static local:BoolConverters.Not}}" />
+                                                                        <ic:FluentIcon Icon="Image" FontSize="12" VerticalAlignment="Center" IsVisible="{Binding IsImage}" />
+                                                                        <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                                        <TextBlock Grid.Column="2" Text="{Binding LineNumber}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                                        <Button Grid.Column="3" Command="{Binding #Root.DataContext.OpenNoteReferenceCommand}" CommandParameter="{Binding}" ToolTip.Tip="打开" Width="24" Height="24" Padding="0">
+                                                                            <ic:FluentIcon Icon="Open" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                        </Button>
+                                                                        <Button Grid.Column="4" Command="{Binding #Root.DataContext.CopyNoteReferenceCommand}" CommandParameter="{Binding}" ToolTip.Tip="复制" Width="24" Height="24" Padding="0">
+                                                                            <ic:FluentIcon Icon="Copy" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                        </Button>
+                                                                    </Grid>
+                                                                    <TextBlock Grid.Row="1" Text="{Binding Target}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Margin="20,1,0,0" />
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </ScrollViewer>
+                                            </Grid>
+                                        </Grid>
+
+                                        <StackPanel Grid.Row="2" Spacing="8">
+                                            <Border Height="1" Background="{DynamicResource CardBorderBrush}" />
+                                            <TextBlock Text="属性" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                                <TextBlock Text="标签" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="1" Text="{Binding NoteTagsText}" PlaceholderText="{Binding L.NoteTagsWatermark}" />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                                <TextBlock Text="格式" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="{Binding NoteFormatText}" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
                             </Grid>
                         </Grid>
                     </Grid>
@@ -2151,7 +2564,7 @@
             </fa:FANavigationView>
         </Grid>
 
-        <Border Grid.Row="2"
+        <Border Grid.Row="1"
                 IsVisible="{Binding IsUnlocked}"
                 Background="{DynamicResource LayerFillColorDefaultBrush}"
                 BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"

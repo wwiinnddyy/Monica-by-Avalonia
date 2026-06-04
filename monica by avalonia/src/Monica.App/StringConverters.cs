@@ -6,6 +6,9 @@ namespace Monica.App;
 public static class StringConverters
 {
     public static IValueConverter IsPasswords { get; } = new SectionConverter("Passwords");
+    public static IValueConverter IsNotPasswords { get; } = new NotSectionConverter("Passwords");
+    public static IValueConverter IsContentHeaderVisible { get; } = new NotSectionSetConverter(
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Passwords", "Notes" });
     public static IValueConverter IsTotp { get; } = new SectionConverter("Totp");
     public static IValueConverter IsCards { get; } = new SectionConverter("Cards");
     public static IValueConverter IsNotes { get; } = new SectionConverter("Notes");
@@ -29,10 +32,42 @@ public static class StringConverters
             throw new NotSupportedException();
     }
 
+    private sealed class NotSectionConverter(string section) : IValueConverter
+    {
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            !string.Equals(value?.ToString(), section, StringComparison.OrdinalIgnoreCase);
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class SectionSetConverter(IReadOnlySet<string> sections) : IValueConverter
     {
         public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
             value is not null && sections.Contains(value.ToString() ?? "");
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class NotSectionSetConverter(IReadOnlySet<string> sections) : IValueConverter
+    {
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            value is null || !sections.Contains(value.ToString() ?? "");
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+}
+
+public static class BoolConverters
+{
+    public static IValueConverter Not { get; } = new NotConverter();
+
+    private sealed class NotConverter : IValueConverter
+    {
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            value is bool boolValue && !boolValue;
 
         public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
             throw new NotSupportedException();

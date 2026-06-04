@@ -888,6 +888,12 @@ public sealed class AppSettingsTests
             return Task.FromResult(openFile);
         }
 
+        public Task<PickedBinaryFile?> OpenBinaryFileAsync(string title, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default)
+        {
+            OpenFileTypes = fileTypes;
+            return Task.FromResult<PickedBinaryFile?>(null);
+        }
+
         public Task<string?> SaveTextFileAsync(string title, string suggestedFileName, string content, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default)
         {
             SuggestedFileName = suggestedFileName;

@@ -2,23 +2,46 @@ using Avalonia;
 using Monica.Core.Services;
 using Monica.Data;
 using System;
+using System.IO;
 
 namespace Monica.App;
 
 class Program
 {
+    private static readonly string LogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Monica by Avalonia", "crash.log");
+
     // Initialization code. Don't use any Avalonia, third-party APIs or any
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
     public static int Main(string[] args)
     {
-        if (args.Length > 0 && string.Equals(args[0], "--smoke-vault", StringComparison.Ordinal))
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            File.AppendAllText(LogPath, $"[UnhandledException] {e.ExceptionObject}\n");
+        TaskScheduler.UnobservedTaskException += (_, e) =>
         {
-            return RunVaultSmokeTestAsync(args).GetAwaiter().GetResult();
-        }
+            File.AppendAllText(LogPath, $"[UnobservedTaskException] {e.Exception}\n");
+            e.SetObserved();
+        };
 
-        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        try
+        {
+            File.WriteAllText(LogPath, $"[Start] {DateTime.Now}\n");
+
+            if (args.Length > 0 && string.Equals(args[0], "--smoke-vault", StringComparison.Ordinal))
+            {
+                return RunVaultSmokeTestAsync(args).GetAwaiter().GetResult();
+            }
+
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText(LogPath, $"[Fatal] {ex}\n");
+            throw;
+        }
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.

@@ -35,6 +35,7 @@ public interface IPlatformIntegrationService
 public sealed record PlatformFilePickerFileType(string Name, IReadOnlyList<string> Patterns);
 
 public sealed record PickedTextFile(string FileName, string Content);
+public sealed record PickedBinaryFile(string FileName, byte[] Content);
 
 public interface ISecretProtector
 {
@@ -47,6 +48,7 @@ public interface IFileSystemPickerService
 {
     PlatformIntegrationCapability Capability { get; }
     Task<PickedTextFile?> OpenTextFileAsync(string title, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default);
+    Task<PickedBinaryFile?> OpenBinaryFileAsync(string title, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default);
     Task<string?> SaveTextFileAsync(string title, string suggestedFileName, string content, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default);
 }
 
@@ -218,6 +220,9 @@ public sealed class CapabilityOnlyFileSystemPickerService(IPlatformIntegrationSe
     public PlatformIntegrationCapability Capability => platformIntegrationService.GetCapability(PlatformFeatureKeys.FilePicker);
 
     public Task<PickedTextFile?> OpenTextFileAsync(string title, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default) =>
+        throw CreateUnsupportedException();
+
+    public Task<PickedBinaryFile?> OpenBinaryFileAsync(string title, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default) =>
         throw CreateUnsupportedException();
 
     public Task<string?> SaveTextFileAsync(string title, string suggestedFileName, string content, IReadOnlyList<PlatformFilePickerFileType> fileTypes, CancellationToken cancellationToken = default) =>

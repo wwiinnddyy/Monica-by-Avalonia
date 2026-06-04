@@ -40,6 +40,35 @@ public sealed class AvaloniaFileSystemPickerService(
         return new PickedTextFile(file.Name, content);
     }
 
+    public async Task<PickedBinaryFile?> OpenBinaryFileAsync(
+        string title,
+        IReadOnlyList<PlatformFilePickerFileType> fileTypes,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureUsable();
+
+        var owner = ownerProvider();
+        var files = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+            FileTypeFilter = ToAvaloniaFileTypes(fileTypes)
+        });
+
+        var file = files.FirstOrDefault();
+        if (file is null)
+        {
+            return null;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var stream = await file.OpenReadAsync();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        return new PickedBinaryFile(file.Name, buffer.ToArray());
+    }
+
     public async Task<string?> SaveTextFileAsync(
         string title,
         string suggestedFileName,

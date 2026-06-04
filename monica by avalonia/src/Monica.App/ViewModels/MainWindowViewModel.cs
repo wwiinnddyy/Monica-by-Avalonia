@@ -1,13 +1,18 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Monica.App;
 using Monica.App.Services;
 using Monica.Core.ImportExport;
 using Monica.Core.Models;
@@ -20,6 +25,42 @@ using Monica.Platform.Services;
 namespace Monica.App.ViewModels;
 
 public sealed record SettingsChoice(object Value, string Label);
+public sealed record NoteOutlineItem(int Level, string Title, int LineNumber, Thickness Indent);
+public sealed record NoteReferenceItem(string Label, string Target, int LineNumber, bool IsImage);
+public sealed record NoteImagePreviewItem(string StoragePath, string DisplayName, string SizeText, Bitmap Image);
+public sealed partial class NoteEditorTab : ObservableObject
+{
+    public NoteEditorTab(long id, SecureItem? source, string title)
+    {
+        Id = id;
+        Source = source;
+        Title = string.IsNullOrWhiteSpace(title) ? "New Note" : title.Trim();
+        DraftTitle = Title;
+    }
+
+    public long Id { get; }
+    public SecureItem? Source { get; set; }
+    public bool DraftInitialized { get; set; }
+    public string DraftTitle { get; set; } = "";
+    public string DraftContent { get; set; } = "";
+    public string DraftTagsText { get; set; } = "";
+    public bool DraftIsMarkdown { get; set; } = true;
+    public bool DraftIsFavorite { get; set; }
+    public bool DraftPreviewMode { get; set; }
+    public bool DraftSplitPreviewMode { get; set; }
+    public int DraftSelectionStart { get; set; }
+    public int DraftSelectionEnd { get; set; }
+
+    [ObservableProperty]
+    private string _title;
+
+    [ObservableProperty]
+    private bool _isDirty;
+
+    [ObservableProperty]
+    private bool _isSelected;
+}
+
 public sealed record LocalizedPlatformIntegrationCapability(
     string Key,
     string Title,
@@ -162,6 +203,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [
         new("Notes CSV", ["*.csv"])
     ];
+    private static readonly PlatformFilePickerFileType[] MarkdownFileTypes =
+    [
+        new("Markdown", ["*.md", "*.markdown"])
+    ];
     private static readonly PlatformFilePickerFileType[] WalletCsvFileTypes =
     [
         new("Cards and Documents CSV", ["*.csv"])
@@ -169,6 +214,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static readonly PlatformFilePickerFileType[] AegisJsonFileTypes =
     [
         new("Aegis JSON", ["*.json"])
+    ];
+    private static readonly PlatformFilePickerFileType[] NoteImageFileTypes =
+    [
+        new("Images", ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"])
     ];
 
     private enum QuickAccessSort
@@ -250,6 +299,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private IReadOnlyDictionary<long, CompromisedPasswordResult> _compromisedPasswordResults = new Dictionary<long, CompromisedPasswordResult>();
     private bool _hasCompromisedPasswordCheckResults;
     private bool _isApplyingSettings;
+    private bool _isLoadingNoteEditor;
+    private int _noteImagePreviewVersion;
     private LegacyVaultDetection _legacyVaultDetection = LegacyVaultDetection.Empty;
 
     public MainWindowViewModel(
@@ -313,18 +364,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     public ILocalizationService L => _localization;
-    public ObservableCollection<PasswordEntry> Passwords { get; } = [];
-    public ObservableCollection<PasswordEntry> ArchivedPasswords { get; } = [];
-    public ObservableCollection<PasswordEntry> DeletedPasswords { get; } = [];
-    public ObservableCollection<SecureItem> NoteItems { get; } = [];
-    public ObservableCollection<SecureItem> TotpItems { get; } = [];
-    public ObservableCollection<SecureItem> WalletItems { get; } = [];
-    public ObservableCollection<Category> Categories { get; } = [];
+    public ObservableCollection<PasswordEntry> Passwords { get; } = new ObservableRangeCollection<PasswordEntry>();
+    public ObservableCollection<PasswordEntry> ArchivedPasswords { get; } = new ObservableRangeCollection<PasswordEntry>();
+    public ObservableCollection<PasswordEntry> DeletedPasswords { get; } = new ObservableRangeCollection<PasswordEntry>();
+    public ObservableCollection<SecureItem> NoteItems { get; } = new ObservableRangeCollection<SecureItem>();
+    public ObservableCollection<NoteEditorTab> OpenNoteTabs { get; } = [];
+    public ObservableCollection<NoteImagePreviewItem> NoteImagePreviewItems { get; } = [];
+    public ObservableCollection<SecureItem> TotpItems { get; } = new ObservableRangeCollection<SecureItem>();
+    public ObservableCollection<SecureItem> WalletItems { get; } = new ObservableRangeCollection<SecureItem>();
+    public ObservableCollection<Category> Categories { get; } = new ObservableRangeCollection<Category>();
     public ObservableCollection<LocalizedPlatformIntegrationCapability> PlatformIntegrationCapabilities { get; } = [];
     public ObservableCollection<LocalizedPlatformCapability> Capabilities { get; } = [];
-    public ObservableCollection<LocalMdbxDatabase> MdbxDatabases { get; } = [];
+    public ObservableCollection<LocalMdbxDatabase> MdbxDatabases { get; } = new ObservableRangeCollection<LocalMdbxDatabase>();
     public ObservableCollection<MdbxDatabaseDisplayItem> MdbxDatabaseItems { get; } = [];
-    public ObservableCollection<TimelineEntry> TimelineEntries { get; } = [];
+    public ObservableCollection<TimelineEntry> TimelineEntries { get; } = new ObservableRangeCollection<TimelineEntry>();
     public ObservableCollection<SecuritySummaryItem> SecuritySummaryItems { get; } = [];
     public ObservableCollection<SecurityIssueItem> SecurityIssueItems { get; } = [];
     public ObservableCollection<VaultSourceDisplayItem> VaultSources { get; } = [];
@@ -496,10 +549,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _isCheckingCompromisedPasswords;
 
     [ObservableProperty]
+    private bool _isLoadingVault;
+
+    [ObservableProperty]
     private string _compromisedPasswordStatus = "";
 
     [ObservableProperty]
     private SecureItem? _selectedNote;
+
+    [ObservableProperty]
+    private NoteEditorTab? _selectedNoteTab;
 
     [ObservableProperty]
     private string _noteTitle = "";
@@ -511,13 +570,111 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _noteTagsText = "";
 
     [ObservableProperty]
+    private string _noteSearchText = "";
+
+    [ObservableProperty]
     private bool _noteIsMarkdown = true;
 
     [ObservableProperty]
     private bool _notePreviewMode;
 
     [ObservableProperty]
+    private bool _noteSplitPreviewMode;
+
+    [ObservableProperty]
     private bool _noteIsFavorite;
+
+    public string NoteLineNumbersText => BuildLineNumbersText(NoteContent);
+    public int NoteLineCount => CountNoteLines(NoteContent);
+    public int NoteWordCount => CountNoteWords(NoteContent);
+    public int NoteCharacterCount => NoteContent.Length;
+    public IReadOnlyList<NoteOutlineItem> NoteOutlineItems => BuildNoteOutlineItems(NoteContent);
+    public IReadOnlyList<NoteReferenceItem> NoteReferenceItems => BuildNoteReferenceItems(NoteContent);
+    public int NoteOutlineCount => NoteOutlineItems.Count;
+    public int NoteReferenceCount => NoteReferenceItems.Count;
+    public bool HasNoteOutlineItems => NoteOutlineCount > 0;
+    public bool HasNoteReferenceItems => NoteReferenceCount > 0;
+    public int NoteImagePreviewCount => NoteImagePreviewItems.Count;
+    public bool HasNoteImagePreviewItems => NoteImagePreviewCount > 0;
+    public string NoteFormatText => NoteIsMarkdown ? "Markdown" : "Plain text";
+    public IReadOnlyList<SecureItem> FavoriteNoteItems => BuildFilteredNoteItems(favoritesOnly: true);
+    public IReadOnlyList<SecureItem> FilteredNoteItems => BuildFilteredNoteItems(favoritesOnly: false);
+    public int FavoriteNoteCount => NoteItems.Count(item => item.IsFavorite);
+    public bool HasFavoriteNoteItems => FavoriteNoteItems.Count > 0;
+    public bool HasFilteredNoteItems => FilteredNoteItems.Count > 0;
+    public string NoteTreeStatusText => string.IsNullOrWhiteSpace(NoteSearchText)
+        ? NoteCountText
+        : $"{FilteredNoteItems.Count}/{NoteItems.Count}";
+    public bool IsNoteEditorPaneVisible => !NotePreviewMode || NoteSplitPreviewMode;
+    public bool IsNotePreviewPaneVisible => NotePreviewMode || NoteSplitPreviewMode;
+    public GridLength NoteEditorColumnWidth => IsNoteEditorPaneVisible
+        ? new GridLength(1, GridUnitType.Star)
+        : new GridLength(0);
+    public GridLength NotePreviewSeparatorColumnWidth => NoteSplitPreviewMode
+        ? new GridLength(18)
+        : new GridLength(0);
+    public GridLength NotePreviewColumnWidth => IsNotePreviewPaneVisible
+        ? new GridLength(1, GridUnitType.Star)
+        : new GridLength(0);
+    public string NoteEditorStatusText =>
+        NoteSelectedCharacterCount > 0
+            ? $"行 {NoteCaretLine}, 列 {NoteCaretColumn} · 已选 {NoteSelectedCharacterCount} · {NoteLineCount} 行 · {NoteWordCount} 词 · {NoteCharacterCount} 字符"
+            : $"行 {NoteCaretLine}, 列 {NoteCaretColumn} · {NoteLineCount} 行 · {NoteWordCount} 词 · {NoteCharacterCount} 字符";
+    public bool HasOpenNoteTabs => OpenNoteTabs.Count > 0;
+    public double NoteTabWidth => CalculateNoteTabWidth(OpenNoteTabs.Count, NoteTabRailViewportWidth);
+
+    private double _noteTabRailViewportWidth;
+
+    public double NoteTabRailViewportWidth
+    {
+        get => _noteTabRailViewportWidth;
+        set
+        {
+            if (SetProperty(ref _noteTabRailViewportWidth, Math.Max(0, value)))
+            {
+                OnPropertyChanged(nameof(NoteTabWidth));
+            }
+        }
+    }
+
+    private static double CalculateNoteTabWidth(int tabCount, double viewportWidth)
+    {
+        const double maxWidth = 156;
+        const double minWidth = 92;
+        const double tabGap = 4;
+
+        if (tabCount <= 0)
+        {
+            return maxWidth;
+        }
+
+        if (viewportWidth <= 0 || double.IsNaN(viewportWidth))
+        {
+            return tabCount switch
+            {
+                <= 1 => maxWidth,
+                <= 4 => 148,
+                <= 7 => 128,
+                <= 10 => 112,
+                _ => minWidth
+            };
+        }
+
+        var widthThatFits = (viewportWidth - ((tabCount - 1) * tabGap) - 8) / tabCount;
+        return Math.Clamp(widthThatFits, minWidth, maxWidth);
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NoteEditorStatusText))]
+    private int _noteCaretLine = 1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NoteEditorStatusText))]
+    private int _noteCaretColumn = 1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NoteEditorStatusText))]
+    private int _noteSelectedCharacterCount;
 
     [ObservableProperty]
     private SecureItem? _selectedWalletItem;
@@ -693,6 +850,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _quickFilterAttachments;
 
+    [ObservableProperty]
+    private PasswordEntry? _selectedPassword;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedPasswordDetails))]
+    private PasswordDetailViewModel? _selectedPasswordDetails;
+
     public string SelectedSectionTitle => SectionTitle(SelectedSection);
     public string ShellVaultText => SelectedSection switch
     {
@@ -799,6 +963,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public string NotePlainPreview => NoteContentCodec.ToPlainPreview(NoteContent, NoteIsMarkdown);
     public int SelectedPasswordCount => Passwords.Count(item => item.IsSelected);
     public bool HasSelectedPasswords => SelectedPasswordCount > 0;
+    public bool HasSelectedPasswordDetails => SelectedPasswordDetails is not null;
     public int SelectedTotpCount => TotpItems.Count(item => item.IsSelected);
     public string SelectedTotpCountText => _localization.Format("SelectedTotpCountFormat", SelectedTotpCount);
     public bool HasSelectedTotpItems => SelectedTotpCount > 0;
@@ -857,7 +1022,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     partial void OnQuickFilterAttachmentsChanged(bool value) => RefreshPasswordFilters();
     partial void OnSelectedPasswordFolderFilterChanged(PasswordFolderFilterChoice? value)
     {
-        RefreshPasswordFilters();
+        OnPropertyChanged(nameof(FilteredPasswords));
+        RaisePasswordSelectionState();
+        ReconcileSelectedPasswordDetails();
         OnPropertyChanged(nameof(CanManageSelectedPasswordFolder));
     }
     partial void OnSelectedPasswordSortChanged(string value)
@@ -865,6 +1032,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         UpdateSettings(settings => settings.PasswordSortOrder = value);
         OnPropertyChanged(nameof(FilteredPasswords));
         RaisePasswordSelectionState();
+    }
+
+    async partial void OnSelectedPasswordChanged(PasswordEntry? value)
+    {
+        await RefreshSelectedPasswordDetailsAsync(value);
     }
 
     partial void OnSelectedSectionChanged(string value)
@@ -887,15 +1059,90 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(NotePreviewMarkdown));
         OnPropertyChanged(nameof(NotePlainPreview));
+        OnPropertyChanged(nameof(NoteLineNumbersText));
+        OnPropertyChanged(nameof(NoteLineCount));
+        OnPropertyChanged(nameof(NoteWordCount));
+        OnPropertyChanged(nameof(NoteCharacterCount));
+        OnPropertyChanged(nameof(NoteOutlineItems));
+        OnPropertyChanged(nameof(NoteReferenceItems));
+        OnPropertyChanged(nameof(NoteOutlineCount));
+        OnPropertyChanged(nameof(NoteReferenceCount));
+        OnPropertyChanged(nameof(HasNoteOutlineItems));
+        OnPropertyChanged(nameof(HasNoteReferenceItems));
+        OnPropertyChanged(nameof(NoteEditorStatusText));
+        MarkSelectedNoteTabDirty();
+        _ = RefreshNoteImagePreviewsAsync(value);
     }
+
+    partial void OnNoteTagsTextChanged(string value) => MarkSelectedNoteTabDirty();
 
     partial void OnNoteIsMarkdownChanged(bool value)
     {
         OnPropertyChanged(nameof(NotePreviewMarkdown));
         OnPropertyChanged(nameof(NotePlainPreview));
+        OnPropertyChanged(nameof(NoteFormatText));
+        MarkSelectedNoteTabDirty();
     }
 
-    partial void OnSelectedNoteChanged(SecureItem? value) => LoadNoteIntoEditor(value);
+    partial void OnNotePreviewModeChanged(bool value)
+    {
+        if (value && NoteSplitPreviewMode)
+        {
+            NoteSplitPreviewMode = false;
+        }
+
+        RaiseNoteEditorLayoutState();
+        CaptureSelectedNoteTabViewState();
+    }
+
+    partial void OnNoteSplitPreviewModeChanged(bool value)
+    {
+        if (value && NotePreviewMode)
+        {
+            NotePreviewMode = false;
+        }
+
+        RaiseNoteEditorLayoutState();
+        CaptureSelectedNoteTabViewState();
+    }
+
+    partial void OnNoteTitleChanged(string value)
+    {
+        MarkSelectedNoteTabDirty();
+    }
+
+    partial void OnNoteSearchTextChanged(string value) => RaiseNoteTreeState();
+
+    partial void OnSelectedNoteChanged(SecureItem? value)
+    {
+        if (_isLoadingNoteEditor)
+        {
+            return;
+        }
+
+        if (value is not null)
+        {
+            OpenNoteTab(value);
+            return;
+        }
+
+        if (!_isLoadingNoteEditor)
+        {
+            SelectedNoteTab = null;
+            ResetNoteEditor();
+        }
+    }
+
+    partial void OnSelectedNoteTabChanged(NoteEditorTab? oldValue, NoteEditorTab? newValue)
+    {
+        if (!_isLoadingNoteEditor && oldValue is not null)
+        {
+            CaptureNoteEditorState(oldValue, markDirty: false);
+        }
+
+        LoadNoteTab(newValue);
+        RefreshNoteTabState();
+    }
 
     partial void OnSelectedWalletItemChanged(SecureItem? value)
     {
@@ -1077,9 +1324,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         try
         {
+            AppDiagnostics.Info("Initialize started");
             await _settingsService.LoadAsync();
             ApplySettings(_settingsService.Current);
-            var initialization = await _vaultUnlockCoordinator.InitializeAsync();
+            var initialization = await AppDiagnostics.MeasureAsync(
+                "Vault metadata initialize",
+                () => _vaultUnlockCoordinator.InitializeAsync());
             _legacyVaultDetection = initialization.LegacyVaultDetection;
             RaiseLegacyVaultImportPrompt();
             if (_legacyVaultDetection.RequiresImport)
@@ -1093,9 +1343,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
             StatusMessage = IsVaultInitialized
                 ? _localization.Get("VaultLocked")
                 : _localization.Get("FirstRunCreateMasterPassword");
+            AppDiagnostics.Info($"Initialize completed. initialized={IsVaultInitialized}, legacyImportRequired={_legacyVaultDetection.RequiresImport}");
         }
         catch (Exception ex)
         {
+            AppDiagnostics.Error("Initialize failed", ex);
             StatusMessage = _localization.Format("VaultMetadataLoadFailedFormat", ex.Message);
         }
     }
@@ -1103,10 +1355,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task UnlockAsync()
     {
-        var result = await _vaultUnlockCoordinator.UnlockOrCreateAsync(
-            MasterPassword,
-            ConfirmMasterPassword,
-            _legacyVaultDetection);
+        AppDiagnostics.Info($"Unlock requested. initialized={IsVaultInitialized}, legacyImportRequired={_legacyVaultDetection.RequiresImport}");
+        var result = await AppDiagnostics.MeasureAsync(
+            "Unlock credential verification",
+            () => _vaultUnlockCoordinator.UnlockOrCreateAsync(
+                MasterPassword,
+                ConfirmMasterPassword,
+                _legacyVaultDetection));
+        AppDiagnostics.Info($"Unlock result={result.Status}");
 
         switch (result.Status)
         {
@@ -1135,8 +1391,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 IsUnlocked = true;
                 MasterPassword = "";
                 ConfirmMasterPassword = "";
-                StatusMessage = _localization.Get(result.MessageKey);
-                await LoadAsync();
+                StatusMessage = $"{_localization.Get(result.MessageKey)}，正在加载保险库数据...";
+                _ = LoadAfterUnlockAsync();
                 return;
             default:
                 IsUnlocked = false;
@@ -1145,11 +1401,31 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    public async Task LoadAsync()
+    private async Task LoadAfterUnlockAsync()
     {
+        await Task.Yield();
+        await LoadCoreAsync(deferSecurityAnalysis: true);
+    }
+
+    [RelayCommand]
+    public Task LoadAsync() => LoadCoreAsync(deferSecurityAnalysis: false);
+
+    private async Task LoadCoreAsync(bool deferSecurityAnalysis)
+    {
+        if (IsLoadingVault)
+        {
+            AppDiagnostics.Info("Vault load skipped because another load is running");
+            return;
+        }
+
+        IsLoadingVault = true;
+        var loadStopwatch = Stopwatch.StartNew();
+        AppDiagnostics.Info("Vault load started");
         try
         {
+            StatusMessage = "正在加载保险库数据...";
+            SelectedPassword = null;
+            SelectedPasswordDetails = null;
             Passwords.Clear();
             ArchivedPasswords.Clear();
             DeletedPasswords.Clear();
@@ -1162,79 +1438,115 @@ public sealed partial class MainWindowViewModel : ObservableObject
             VaultSources.Clear();
             TimelineEntries.Clear();
 
-            var allPasswords = await _repository.GetPasswordsAsync(includeDeleted: true, includeArchived: true);
+            var allPasswords = await AppDiagnostics.MeasureAsync(
+                "Load passwords",
+                () => _repository.GetPasswordsAsync(includeDeleted: true, includeArchived: true));
             var activePasswords = allPasswords.Where(item => !item.IsDeleted && !item.IsArchived).ToArray();
             var archivedPasswords = allPasswords.Where(item => !item.IsDeleted && item.IsArchived).ToArray();
             var deletedPasswords = allPasswords.Where(item => item.IsDeleted).ToArray();
-            _passwordCustomFields = await _repository.GetCustomFieldsByEntryIdsAsync(allPasswords.Select(item => item.Id).ToArray());
-            _passwordAttachments = await _repository.GetAttachmentsByOwnerIdsAsync("PASSWORD", allPasswords.Select(item => item.Id).ToArray());
-            foreach (var item in activePasswords)
-            {
-                RefreshPasswordTotpDisplay(item);
-                RefreshPasswordAttachmentState(item);
-                item.IsSelected = false;
-                TrackPasswordSelection(item);
-                Passwords.Add(item);
-            }
+            var passwordIds = allPasswords.Select(item => item.Id).ToArray();
+            _passwordCustomFields = await AppDiagnostics.MeasureAsync(
+                "Load password custom fields",
+                () => _repository.GetCustomFieldsByEntryIdsAsync(passwordIds));
+            _passwordAttachments = await AppDiagnostics.MeasureAsync(
+                "Load password attachments",
+                () => _repository.GetAttachmentsByOwnerIdsAsync("PASSWORD", passwordIds));
 
-            foreach (var item in archivedPasswords)
+            AppDiagnostics.Measure("Prepare password collections", () =>
             {
-                RefreshPasswordTotpDisplay(item);
-                RefreshPasswordAttachmentState(item);
-                item.IsSelected = false;
-                TrackPasswordSelection(item);
-                ArchivedPasswords.Add(item);
-            }
+                foreach (var item in activePasswords)
+                {
+                    RefreshPasswordTotpDisplay(item);
+                    RefreshPasswordAttachmentState(item);
+                    item.IsSelected = false;
+                    TrackPasswordSelection(item);
+                }
 
-            foreach (var item in deletedPasswords)
-            {
-                RefreshPasswordTotpDisplay(item);
-                RefreshPasswordAttachmentState(item);
-                item.IsSelected = false;
-                TrackPasswordSelection(item);
-                DeletedPasswords.Add(item);
-            }
+                foreach (var item in archivedPasswords)
+                {
+                    RefreshPasswordTotpDisplay(item);
+                    RefreshPasswordAttachmentState(item);
+                    item.IsSelected = false;
+                    TrackPasswordSelection(item);
+                }
 
-            foreach (var item in await _repository.GetSecureItemsAsync(VaultItemType.Note))
-            {
-                NoteItems.Add(item);
-            }
+                foreach (var item in deletedPasswords)
+                {
+                    RefreshPasswordTotpDisplay(item);
+                    RefreshPasswordAttachmentState(item);
+                    item.IsSelected = false;
+                    TrackPasswordSelection(item);
+                }
+            });
+            ReplaceItems(Passwords, activePasswords);
+            ReplaceItems(ArchivedPasswords, archivedPasswords);
+            ReplaceItems(DeletedPasswords, deletedPasswords);
 
-            foreach (var item in await _repository.GetSecureItemsAsync())
+            var secureItems = await AppDiagnostics.MeasureAsync(
+                "Load secure items",
+                () => _repository.GetSecureItemsAsync());
+            var notes = secureItems
+                .Where(item => item.ItemType == VaultItemType.Note)
+                .ToArray();
+            ReplaceItems(NoteItems, notes);
+
+            var walletItems = new List<SecureItem>();
+            var storedTotps = new List<SecureItem>();
+            foreach (var item in secureItems)
             {
                 if (item.ItemType is VaultItemType.BankCard or VaultItemType.Document)
                 {
                     item.IsSelected = false;
                     TrackWalletSelection(item);
-                    WalletItems.Add(item);
+                    walletItems.Add(item);
+                }
+                else if (item.ItemType == VaultItemType.Totp)
+                {
+                    storedTotps.Add(item);
                 }
             }
+            ReplaceItems(WalletItems, walletItems);
 
-            foreach (var category in await _repository.GetCategoriesAsync())
-            {
-                Categories.Add(category);
-            }
+            var categories = await AppDiagnostics.MeasureAsync(
+                "Load categories",
+                () => _repository.GetCategoriesAsync());
+            ReplaceItems(Categories, categories);
 
             RefreshPasswordFolderFilters();
             await LoadPasswordQuickAccessAsync();
-            foreach (var database in await _repository.GetMdbxDatabasesAsync())
-            {
-                MdbxDatabases.Add(database);
-            }
+            var databases = await AppDiagnostics.MeasureAsync(
+                "Load MDBX database metadata",
+                () => _repository.GetMdbxDatabasesAsync());
+            ReplaceItems(MdbxDatabases, databases);
 
             RefreshMdbxVaultState();
             RefreshVaultSources();
-            await LoadTotpItemsAsync();
+            await LoadTotpItemsAsync(storedTotps);
             ReconcileSecureItemSelectionsAfterLoad();
             await LoadTimelineAsync();
-            RefreshSecurityAnalysis();
             RaiseCounts();
             OnPropertyChanged(nameof(FilteredPasswords));
+            StatusMessage = _localization.Get("VaultUnlocked");
+            if (deferSecurityAnalysis)
+            {
+                _ = RefreshSecurityAnalysisDeferredAsync();
+            }
+            else
+            {
+                AppDiagnostics.Measure("Refresh security analysis", RefreshSecurityAnalysis);
+            }
+
+            AppDiagnostics.Info($"Vault load completed in {loadStopwatch.ElapsedMilliseconds} ms. passwords={Passwords.Count}, archived={ArchivedPasswords.Count}, deleted={DeletedPasswords.Count}, notes={NoteItems.Count}, totp={TotpItems.Count}, wallet={WalletItems.Count}");
         }
         catch (Exception ex)
         {
+            AppDiagnostics.Error($"Vault load failed after {loadStopwatch.ElapsedMilliseconds} ms", ex);
             IsUnlocked = false;
             StatusMessage = _localization.Format("VaultLoadFailedFormat", ex.Message);
+        }
+        finally
+        {
+            IsLoadingVault = false;
         }
     }
 
@@ -1259,6 +1571,41 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             StatusMessage = _localization.Format("GitHubRepositoryOpenFailedFormat", ex.Message);
         }
+    }
+
+    private bool CanOpenNoteReference(NoteReferenceItem? item) =>
+        CanOpenExternalLinks && TryCreateExternalReferenceUri(item?.Target, out _);
+
+    [RelayCommand(CanExecute = nameof(CanOpenNoteReference))]
+    private async Task OpenNoteReferenceAsync(NoteReferenceItem? item)
+    {
+        if (!TryCreateExternalReferenceUri(item?.Target, out var uri))
+        {
+            StatusMessage = "无法打开此引用";
+            return;
+        }
+
+        try
+        {
+            await _externalLinkService.OpenAsync(uri);
+            StatusMessage = $"已打开 {uri.Host}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"打开引用失败：{ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyNoteReferenceAsync(NoteReferenceItem? item)
+    {
+        if (item is null || string.IsNullOrWhiteSpace(item.Target))
+        {
+            return;
+        }
+
+        await _clipboardService.SetTextAsync(item.Target);
+        StatusMessage = "已复制引用";
     }
 
     [RelayCommand]
@@ -1641,11 +1988,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         await RecordPasswordQuickAccessAsync(entry);
-        var siblings = entry.IsDeleted
-            ? GetDeletedPasswordSiblings(entry).ToList()
-            : entry.IsArchived
-                ? GetArchivedPasswordSiblings(entry).ToList()
-                : GetPasswordSiblings(entry).ToList();
+        var siblings = GetPasswordDetailSiblings(entry);
         var customFields = await GetGroupCustomFieldsAsync(entry, siblings);
         var category = entry.CategoryId is null
             ? null
@@ -1669,6 +2012,55 @@ public sealed partial class MainWindowViewModel : ObservableObject
             DeletePasswordHistoryAsync,
             ClearPasswordHistoryAsync);
     }
+
+    private async Task RefreshSelectedPasswordDetailsAsync(PasswordEntry? entry)
+    {
+        if (entry is null)
+        {
+            SelectedPasswordDetails = null;
+            return;
+        }
+
+        SelectedPasswordDetails = await BuildPasswordDetailViewModelAsync(entry);
+    }
+
+    private async Task<PasswordDetailViewModel> BuildPasswordDetailViewModelAsync(PasswordEntry entry)
+    {
+        var siblings = GetPasswordDetailSiblings(entry);
+        var customFields = await GetGroupCustomFieldsAsync(entry, siblings);
+        var category = entry.CategoryId is null
+            ? null
+            : Categories.FirstOrDefault(item => item.Id == entry.CategoryId);
+        var boundNote = entry.BoundNoteId is null
+            ? null
+            : NoteItems.FirstOrDefault(item => item.Id == entry.BoundNoteId);
+        var attachments = GetGroupAttachments(entry, siblings);
+        var history = await GetPasswordHistoryDisplayItemsAsync(entry.Id);
+
+        return new PasswordDetailViewModel(
+            _localization,
+            _clipboardService,
+            _cryptoService,
+            _totpService,
+            entry,
+            siblings,
+            category,
+            boundNote,
+            attachments,
+            customFields,
+            history,
+            AddPasswordAttachmentAsync,
+            DeletePasswordAttachmentAsync,
+            DeletePasswordHistoryAsync,
+            ClearPasswordHistoryAsync);
+    }
+
+    private IReadOnlyList<PasswordEntry> GetPasswordDetailSiblings(PasswordEntry entry) =>
+        entry.IsDeleted
+            ? GetDeletedPasswordSiblings(entry).ToList()
+            : entry.IsArchived
+                ? GetArchivedPasswordSiblings(entry).ToList()
+                : GetPasswordSiblings(entry).ToList();
 
     [RelayCommand]
     private async Task OpenQuickAccessPasswordAsync(PasswordQuickAccessItem? item)
@@ -1702,6 +2094,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         RaisePasswordSelectionState();
+        ReconcileSelectedPasswordDetails();
     }
 
     [RelayCommand]
@@ -2566,28 +2959,274 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void AddNote()
     {
-        SelectedNote = null;
-        ResetNoteEditor();
+        var tab = new NoteEditorTab(-DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), null, _localization.Get("NewSecureNote"))
+        {
+            IsDirty = true,
+            DraftInitialized = true,
+            DraftContent = "",
+            DraftTagsText = "",
+            DraftIsMarkdown = true,
+            DraftIsFavorite = false,
+            DraftPreviewMode = false,
+            DraftSplitPreviewMode = false
+        };
+        OpenNoteTabs.Add(tab);
+        NotifyNoteTabsChanged();
+        SelectedNoteTab = tab;
         StatusMessage = _localization.Get("EditingNewSecureNote");
+    }
+
+    [RelayCommand]
+    private void OpenNote(SecureItem? item)
+    {
+        if (item is not null)
+        {
+            OpenNoteTab(item);
+        }
+    }
+
+    [RelayCommand]
+    private void SelectNoteTab(NoteEditorTab? tab)
+    {
+        if (tab is not null)
+        {
+            SelectedNoteTab = tab;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseNoteTab(NoteEditorTab? tab)
+    {
+        tab ??= SelectedNoteTab;
+        if (tab is null)
+        {
+            return;
+        }
+
+        var index = OpenNoteTabs.IndexOf(tab);
+        OpenNoteTabs.Remove(tab);
+        NotifyNoteTabsChanged();
+        if (ReferenceEquals(SelectedNoteTab, tab))
+        {
+            SelectedNoteTab = OpenNoteTabs.Count == 0
+                ? null
+                : OpenNoteTabs[Math.Clamp(index, 0, OpenNoteTabs.Count - 1)];
+        }
+
+        RefreshNoteTabState();
+    }
+
+    private bool CanSelectPreviousNoteTab() =>
+        SelectedNoteTab is not null && OpenNoteTabs.IndexOf(SelectedNoteTab) > 0;
+
+    [RelayCommand(CanExecute = nameof(CanSelectPreviousNoteTab))]
+    private void SelectPreviousNoteTab()
+    {
+        var index = SelectedNoteTab is null ? -1 : OpenNoteTabs.IndexOf(SelectedNoteTab);
+        if (index > 0)
+        {
+            SelectedNoteTab = OpenNoteTabs[index - 1];
+        }
+    }
+
+    private bool CanSelectNextNoteTab()
+    {
+        var index = SelectedNoteTab is null ? -1 : OpenNoteTabs.IndexOf(SelectedNoteTab);
+        return index >= 0 && index < OpenNoteTabs.Count - 1;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSelectNextNoteTab))]
+    private void SelectNextNoteTab()
+    {
+        var index = SelectedNoteTab is null ? -1 : OpenNoteTabs.IndexOf(SelectedNoteTab);
+        if (index >= 0 && index < OpenNoteTabs.Count - 1)
+        {
+            SelectedNoteTab = OpenNoteTabs[index + 1];
+        }
+    }
+
+    private void NotifyNoteTabsChanged()
+    {
+        OnPropertyChanged(nameof(HasOpenNoteTabs));
+        OnPropertyChanged(nameof(NoteTabWidth));
+    }
+
+    private void RaiseNoteEditorLayoutState()
+    {
+        OnPropertyChanged(nameof(IsNoteEditorPaneVisible));
+        OnPropertyChanged(nameof(IsNotePreviewPaneVisible));
+        OnPropertyChanged(nameof(NoteEditorColumnWidth));
+        OnPropertyChanged(nameof(NotePreviewSeparatorColumnWidth));
+        OnPropertyChanged(nameof(NotePreviewColumnWidth));
+    }
+
+    private void RaiseNoteTreeState()
+    {
+        OnPropertyChanged(nameof(FavoriteNoteItems));
+        OnPropertyChanged(nameof(FilteredNoteItems));
+        OnPropertyChanged(nameof(FavoriteNoteCount));
+        OnPropertyChanged(nameof(HasFavoriteNoteItems));
+        OnPropertyChanged(nameof(HasFilteredNoteItems));
+        OnPropertyChanged(nameof(NoteTreeStatusText));
+    }
+
+    private void RefreshNoteTabState()
+    {
+        foreach (var tab in OpenNoteTabs)
+        {
+            tab.IsSelected = ReferenceEquals(tab, SelectedNoteTab);
+        }
+
+        SelectPreviousNoteTabCommand.NotifyCanExecuteChanged();
+        SelectNextNoteTabCommand.NotifyCanExecuteChanged();
+    }
+
+    private IReadOnlyList<SecureItem> BuildFilteredNoteItems(bool favoritesOnly)
+    {
+        var query = NoteSearchText ?? "";
+        return NoteItems
+            .Where(item => (!favoritesOnly || item.IsFavorite) && MatchesNoteSearch(item, query))
+            .OrderByDescending(item => item.IsFavorite)
+            .ThenByDescending(item => item.UpdatedAt)
+            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool MatchesNoteSearch(SecureItem item, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return true;
+        }
+
+        var terms = query
+            .Split([' ', '\t', '\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (terms.Length == 0)
+        {
+            return true;
+        }
+
+        var decodedContent = "";
+        var decodedTags = "";
+        try
+        {
+            var decoded = NoteContentCodec.DecodeFromItem(item);
+            decodedContent = decoded.Content;
+            decodedTags = string.Join(" ", decoded.Tags);
+        }
+        catch
+        {
+            // Keep the file tree usable even when a legacy note payload cannot be decoded.
+        }
+
+        return terms.All(term =>
+            ContainsOrdinalIgnoreCase(item.Title, term) ||
+            ContainsOrdinalIgnoreCase(item.Notes, term) ||
+            ContainsOrdinalIgnoreCase(decodedContent, term) ||
+            ContainsOrdinalIgnoreCase(decodedTags, term));
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(string? source, string value) =>
+        !string.IsNullOrEmpty(source) &&
+        source.Contains(value, StringComparison.OrdinalIgnoreCase);
+
+    [RelayCommand]
+    private void InsertMarkdown(string? action)
+    {
+        var snippet = action switch
+        {
+            "h1" => "# Heading",
+            "h2" => "## Heading",
+            "bold" => "**bold text**",
+            "italic" => "_italic text_",
+            "quote" => "> Quote",
+            "code" => "```\ncode\n```",
+            "ul" => "- List item",
+            "ol" => "1. List item",
+            "todo" => "- [ ] Task",
+            "table" => "| Column | Column |\n| --- | --- |\n| Value | Value |",
+            "link" => "[link text](https://)",
+            "hr" => "---",
+            _ => ""
+        };
+
+        if (string.IsNullOrWhiteSpace(snippet))
+        {
+            return;
+        }
+
+        AppendNoteContentSnippet(snippet);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
+    private async Task InsertNoteImageAsync()
+    {
+        var markdown = await PickNoteImageMarkdownAsync();
+        if (!string.IsNullOrWhiteSpace(markdown))
+        {
+            AppendNoteContentSnippet(markdown);
+        }
+    }
+
+    public async Task<string?> PickNoteImageMarkdownAsync()
+    {
+        try
+        {
+            var file = await _fileSystemPickerService.OpenBinaryFileAsync("插入图片", NoteImageFileTypes);
+            if (file is null)
+            {
+                return null;
+            }
+
+            var draft = await _passwordAttachmentFileService.StoreAttachmentAsync(
+                file.FileName,
+                file.Content,
+                InferImageContentType(file.FileName));
+            StatusMessage = $"已插入图片 {draft.FileName}";
+            return NoteContentCodec.BuildInlineImageMarkdown(draft.StoragePath);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"插入图片失败：{ex.Message}";
+            return null;
+        }
     }
 
     [RelayCommand]
     private async Task SaveNoteAsync()
     {
+        if (SelectedNoteTab is not null)
+        {
+            CaptureNoteEditorState(SelectedNoteTab, markDirty: SelectedNoteTab.IsDirty);
+            if (!CanSaveNoteTab(SelectedNoteTab))
+            {
+                StatusMessage = _localization.Get("NoteRequiresContent");
+                return;
+            }
+
+            var savedNote = await SaveNoteTabAsync(SelectedNoteTab);
+            SelectedNote = savedNote;
+            await LoadTimelineAsync();
+            RaiseCounts();
+            StatusMessage = _localization.Format("SavedNoteFormat", savedNote.Title);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(NoteTitle) && string.IsNullOrWhiteSpace(NoteContent))
         {
             StatusMessage = _localization.Get("NoteRequiresContent");
             return;
         }
 
+        var sourceNote = SelectedNote;
         var payload = NoteContentCodec.BuildSavePayload(
             NoteTitle,
             NoteContent,
             NoteTagsText,
             NoteIsMarkdown,
-            SelectedNote is null ? [] : NoteContentCodec.DecodeImagePaths(SelectedNote.ImagePaths));
+            sourceNote is null ? [] : NoteContentCodec.DecodeImagePaths(sourceNote.ImagePaths));
 
-        var item = SelectedNote ?? new SecureItem
+        var item = sourceNote ?? new SecureItem
         {
             ItemType = VaultItemType.Note,
             CreatedAt = DateTimeOffset.UtcNow
@@ -2607,13 +3246,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ItemType = "NOTE",
             ItemId = item.Id,
             ItemTitle = item.Title,
-            OperationType = SelectedNote is null ? "CREATE" : "UPDATE",
+            OperationType = sourceNote is null ? "CREATE" : "UPDATE",
             DeviceName = Environment.MachineName
         });
 
-        if (!NoteItems.Contains(item))
+        if (NoteItems.All(note => note.Id != item.Id))
         {
             NoteItems.Insert(0, item);
+        }
+
+        if (SelectedNoteTab is not null)
+        {
+            SelectedNoteTab.Source = item;
+            SelectedNoteTab.Title = item.Title;
+            CaptureNoteEditorState(SelectedNoteTab, markDirty: false);
+            SelectedNoteTab.IsDirty = false;
         }
 
         SelectedNote = item;
@@ -2623,16 +3270,192 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task SaveAllNoteTabsAsync()
+    {
+        if (SelectedNoteTab is not null)
+        {
+            CaptureNoteEditorState(SelectedNoteTab, markDirty: SelectedNoteTab.IsDirty);
+        }
+
+        var dirtyTabs = OpenNoteTabs.Where(tab => tab.IsDirty).ToArray();
+        if (dirtyTabs.Length == 0)
+        {
+            StatusMessage = "没有需要保存的笔记";
+            return;
+        }
+
+        var savedCount = 0;
+        var skippedCount = 0;
+        foreach (var tab in dirtyTabs)
+        {
+            if (!CanSaveNoteTab(tab))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            await SaveNoteTabAsync(tab);
+            savedCount++;
+        }
+
+        if (SelectedNoteTab?.Source is not null)
+        {
+            SelectedNote = SelectedNoteTab.Source;
+        }
+
+        if (savedCount > 0)
+        {
+            await LoadTimelineAsync();
+            RaiseCounts();
+        }
+
+        StatusMessage = skippedCount == 0
+            ? $"已保存 {savedCount} 个笔记"
+            : $"已保存 {savedCount} 个笔记，{skippedCount} 个空笔记未保存";
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
+    private async Task ImportMarkdownNoteAsync()
+    {
+        try
+        {
+            var file = await _fileSystemPickerService.OpenTextFileAsync("导入 Markdown", MarkdownFileTypes);
+            if (file is null)
+            {
+                return;
+            }
+
+            var title = Path.GetFileNameWithoutExtension(file.FileName);
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                title = _localization.Get("Untitled");
+            }
+
+            var tab = new NoteEditorTab(-DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), null, title)
+            {
+                IsDirty = true,
+                DraftInitialized = true,
+                DraftTitle = title,
+                DraftContent = file.Content,
+                DraftTagsText = "",
+                DraftIsMarkdown = true,
+                DraftIsFavorite = false,
+                DraftPreviewMode = false,
+                DraftSplitPreviewMode = false
+            };
+
+            OpenNoteTabs.Add(tab);
+            NotifyNoteTabsChanged();
+            SelectedNoteTab = tab;
+            StatusMessage = $"已导入 Markdown 草稿 {file.FileName}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"导入 Markdown 失败：{ex.Message}";
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUseFilePicker))]
+    private async Task ExportCurrentNoteMarkdownAsync()
+    {
+        if (SelectedNoteTab is not null)
+        {
+            CaptureNoteEditorState(SelectedNoteTab, markDirty: SelectedNoteTab.IsDirty);
+        }
+
+        var title = string.IsNullOrWhiteSpace(NoteTitle)
+            ? _localization.Get("Untitled")
+            : NoteTitle.Trim();
+        var suggestedFileName = $"{BuildSafeFileName(title)}.md";
+        var content = NoteIsMarkdown
+            ? NoteContent
+            : NoteContentCodec.ToPlainPreview(NoteContent, NoteIsMarkdown);
+
+        await SaveExportTextAsync("导出 Markdown", suggestedFileName, content, MarkdownFileTypes);
+    }
+
+    private static bool CanSaveNoteTab(NoteEditorTab tab) =>
+        !string.IsNullOrWhiteSpace(tab.DraftTitle) ||
+        !string.IsNullOrWhiteSpace(tab.DraftContent);
+
+    private static string BuildSafeFileName(string title)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
+        var builder = new StringBuilder(title.Length);
+        foreach (var character in title.Trim())
+        {
+            builder.Append(invalidCharacters.Contains(character) ? '_' : character);
+        }
+
+        var fileName = builder.ToString().Trim(' ', '.');
+        return string.IsNullOrWhiteSpace(fileName) ? "untitled" : fileName;
+    }
+
+    private async Task<SecureItem> SaveNoteTabAsync(NoteEditorTab tab)
+    {
+        var sourceNote = tab.Source;
+        var payload = NoteContentCodec.BuildSavePayload(
+            tab.DraftTitle,
+            tab.DraftContent,
+            tab.DraftTagsText,
+            tab.DraftIsMarkdown,
+            sourceNote is null ? [] : NoteContentCodec.DecodeImagePaths(sourceNote.ImagePaths));
+
+        var item = sourceNote ?? new SecureItem
+        {
+            ItemType = VaultItemType.Note,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        item.Title = payload.Title;
+        item.Notes = payload.NotesCache;
+        item.ItemData = payload.ItemData;
+        item.ImagePaths = payload.ImagePaths;
+        item.IsFavorite = tab.DraftIsFavorite;
+        item.ItemType = VaultItemType.Note;
+        item.SyncStatus = item.BitwardenVaultId is null ? SyncStatus.None : SyncStatus.Pending;
+
+        await _repository.SaveSecureItemAsync(item);
+        await _repository.LogAsync(new OperationLog
+        {
+            ItemType = "NOTE",
+            ItemId = item.Id,
+            ItemTitle = item.Title,
+            OperationType = sourceNote is null ? "CREATE" : "UPDATE",
+            DeviceName = Environment.MachineName
+        });
+
+        if (NoteItems.All(note => note.Id != item.Id))
+        {
+            NoteItems.Insert(0, item);
+        }
+
+        tab.Source = item;
+        tab.Title = item.Title;
+        tab.DraftTitle = item.Title;
+        tab.DraftIsFavorite = item.IsFavorite;
+        tab.IsDirty = false;
+        return item;
+    }
+
+    [RelayCommand]
     private async Task ToggleNoteFavoriteAsync()
     {
         NoteIsFavorite = !NoteIsFavorite;
         if (SelectedNote is null)
         {
+            MarkSelectedNoteTabDirty();
             return;
         }
 
         SelectedNote.IsFavorite = NoteIsFavorite;
         await _repository.SaveSecureItemAsync(SelectedNote);
+        if (SelectedNoteTab is not null)
+        {
+            CaptureNoteEditorState(SelectedNoteTab, markDirty: false);
+        }
+
+        RaiseNoteTreeState();
         StatusMessage = _localization.Format("SavedNoteFormat", SelectedNote.Title);
     }
 
@@ -4055,6 +4878,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SecurityIssueCountText));
         OnPropertyChanged(nameof(LocalDatabaseSummaryText));
         OnPropertyChanged(nameof(MdbxDatabaseCountText));
+        RaiseNoteTreeState();
         RaiseMdbxVaultState();
         OnPropertyChanged(nameof(VaultSourceCountText));
         RaiseTotpSelectionState();
@@ -4374,7 +5198,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(FilteredArchivedPasswords));
         OnPropertyChanged(nameof(FilteredDeletedPasswords));
         RaisePasswordSelectionState();
-        RefreshPasswordFolderFilters();
+        ReconcileSelectedPasswordDetails();
+    }
+
+    private void ReconcileSelectedPasswordDetails()
+    {
+        var visiblePasswords = FilteredPasswords.ToArray();
+        if (SelectedPassword is not null && visiblePasswords.All(item => item.Id != SelectedPassword.Id))
+        {
+            SelectedPassword = null;
+        }
     }
 
     private void TrackPasswordSelection(PasswordEntry entry)
@@ -4425,6 +5258,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
             .Where(record => record.OpenCount > 0 && record.PasswordId > 0)
             .ToDictionary(record => record.PasswordId);
         RaisePasswordQuickAccessState();
+    }
+
+    private static void ReplaceItems<T>(ObservableCollection<T> target, IEnumerable<T> items)
+    {
+        if (target is ObservableRangeCollection<T> range)
+        {
+            range.ReplaceRange(items);
+            return;
+        }
+
+        target.Clear();
+        foreach (var item in items)
+        {
+            target.Add(item);
+        }
     }
 
     private async Task RecordPasswordQuickAccessAsync(PasswordEntry entry)
@@ -5181,7 +6029,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         foreach (var candidate in siblings)
         {
-            var fields = await _repository.GetCustomFieldsAsync(candidate.Id);
+            var fields = _passwordCustomFields.TryGetValue(candidate.Id, out var cachedFields)
+                ? cachedFields
+                : await _repository.GetCustomFieldsAsync(candidate.Id);
             if (fields.Count > 0 || candidate.Id == entry.Id)
             {
                 return fields;
@@ -5191,12 +6041,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         return [];
     }
 
-    private async Task LoadTotpItemsAsync()
+    private async Task LoadTotpItemsAsync(IReadOnlyList<SecureItem>? preloadedTotps = null)
     {
-        TotpItems.Clear();
-        var storedTotps = await _repository.GetSecureItemsAsync(VaultItemType.Totp);
+        var storedTotps = preloadedTotps ?? await AppDiagnostics.MeasureAsync(
+            "Load TOTP secure items",
+            () => _repository.GetSecureItemsAsync(VaultItemType.Totp));
         var activePasswordIds = Passwords.Select(item => item.Id).ToHashSet();
         var seenVirtualPasswordIds = new HashSet<long>();
+        var nextItems = new List<SecureItem>();
 
         foreach (var item in storedTotps)
         {
@@ -5207,7 +6059,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
             TrackTotpSelection(item);
             RefreshTotpDisplay(item);
-            TotpItems.Add(item);
+            nextItems.Add(item);
             if (item.BoundPasswordId is { } passwordId)
             {
                 seenVirtualPasswordIds.Add(passwordId);
@@ -5219,24 +6071,27 @@ public sealed partial class MainWindowViewModel : ObservableObject
             var virtualItem = BuildVirtualTotpItem(password);
             TrackTotpSelection(virtualItem);
             RefreshTotpDisplay(virtualItem);
-            TotpItems.Add(virtualItem);
+            nextItems.Add(virtualItem);
         }
 
+        ReplaceItems(TotpItems, nextItems);
         RaiseTotpSelectionState();
     }
 
     private async Task LoadTimelineAsync()
     {
-        TimelineEntries.Clear();
-        foreach (var log in await _repository.GetOperationLogsAsync(150))
-        {
-            TimelineEntries.Add(new TimelineEntry(
+        var logs = await AppDiagnostics.MeasureAsync(
+            "Load timeline",
+            () => _repository.GetOperationLogsAsync(150));
+        var entries = logs
+            .Select(log => new TimelineEntry(
                 string.IsNullOrWhiteSpace(log.ItemTitle) ? _localization.Get("Untitled") : log.ItemTitle,
                 _localization.Format("TimelineEntryDescriptionFormat", LocalizeOperationType(log.OperationType), log.ItemType, log.DeviceName),
                 log.Timestamp.LocalDateTime.ToString("g", _localization.Culture),
                 log.OperationType,
-                log.ItemType));
-        }
+                log.ItemType))
+            .ToArray();
+        ReplaceItems(TimelineEntries, entries);
 
         OnPropertyChanged(nameof(TimelineCountText));
     }
@@ -5346,6 +6201,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(SecurityIssueCountText));
+    }
+
+    private async Task RefreshSecurityAnalysisDeferredAsync()
+    {
+        try
+        {
+            await Task.Delay(750);
+            if (!IsUnlocked)
+            {
+                return;
+            }
+
+            AppDiagnostics.Measure("Refresh security analysis deferred", RefreshSecurityAnalysis);
+        }
+        catch (Exception ex)
+        {
+            AppDiagnostics.Error("Deferred security analysis failed", ex);
+        }
     }
 
     private SecurityPasswordSnapshot[] BuildSecurityPasswordSnapshots()
@@ -6239,6 +7112,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ExternalLinksIntegrationStatusText));
         OnPropertyChanged(nameof(FilePickerIntegrationStatusText));
         OpenGitHubRepositoryCommand.NotifyCanExecuteChanged();
+        OpenNoteReferenceCommand.NotifyCanExecuteChanged();
         ImportMonicaJsonFileCommand.NotifyCanExecuteChanged();
         ImportPasswordCsvFileCommand.NotifyCanExecuteChanged();
         ImportTotpCsvFileCommand.NotifyCanExecuteChanged();
@@ -6250,6 +7124,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SaveNoteCsvExportCommand.NotifyCanExecuteChanged();
         SaveWalletCsvExportCommand.NotifyCanExecuteChanged();
         SaveAegisJsonExportCommand.NotifyCanExecuteChanged();
+        ImportMarkdownNoteCommand.NotifyCanExecuteChanged();
+        ExportCurrentNoteMarkdownCommand.NotifyCanExecuteChanged();
     }
 
     private void RaiseAboutText()
@@ -6461,6 +7337,458 @@ public sealed partial class MainWindowViewModel : ObservableObject
         StatusMessage = _localization.Format("EditingNoteFormat", item.Title);
     }
 
+    private void OpenNoteTab(SecureItem item)
+    {
+        var tab = OpenNoteTabs.FirstOrDefault(openTab => openTab.Source?.Id == item.Id);
+        if (tab is null)
+        {
+            tab = new NoteEditorTab(item.Id, item, item.Title);
+            OpenNoteTabs.Add(tab);
+            NotifyNoteTabsChanged();
+            RefreshNoteTabState();
+        }
+
+        SelectedNoteTab = tab;
+    }
+
+    private void LoadNoteTab(NoteEditorTab? tab)
+    {
+        _isLoadingNoteEditor = true;
+        try
+        {
+            if (tab is null)
+            {
+                SelectedNote = null;
+                ResetNoteEditor();
+                return;
+            }
+
+            EnsureNoteTabDraftInitialized(tab);
+            SelectedNote = tab.Source;
+            LoadNoteTabDraftIntoEditor(tab);
+        }
+        finally
+        {
+            _isLoadingNoteEditor = false;
+        }
+    }
+
+    private void EnsureNoteTabDraftInitialized(NoteEditorTab tab)
+    {
+        if (tab.DraftInitialized)
+        {
+            return;
+        }
+
+        if (tab.Source is null)
+        {
+            tab.DraftTitle = tab.Title;
+            tab.DraftContent = "";
+            tab.DraftTagsText = "";
+            tab.DraftIsMarkdown = true;
+            tab.DraftIsFavorite = false;
+            tab.DraftPreviewMode = false;
+            tab.DraftSplitPreviewMode = false;
+            tab.DraftInitialized = true;
+            return;
+        }
+
+        var decoded = NoteContentCodec.DecodeFromItem(tab.Source);
+        tab.DraftTitle = tab.Source.Title;
+        tab.DraftContent = decoded.Content;
+        tab.DraftTagsText = string.Join(", ", decoded.Tags);
+        tab.DraftIsMarkdown = decoded.IsMarkdown;
+        tab.DraftIsFavorite = tab.Source.IsFavorite;
+        tab.DraftPreviewMode = decoded.IsMarkdown;
+        tab.DraftSplitPreviewMode = false;
+        tab.Title = string.IsNullOrWhiteSpace(tab.Source.Title) ? _localization.Get("Untitled") : tab.Source.Title.Trim();
+        tab.IsDirty = false;
+        tab.DraftInitialized = true;
+    }
+
+    private void LoadNoteTabDraftIntoEditor(NoteEditorTab tab)
+    {
+        NoteTitle = tab.DraftTitle;
+        NoteContent = tab.DraftContent;
+        NoteTagsText = tab.DraftTagsText;
+        NoteIsMarkdown = tab.DraftIsMarkdown;
+        NoteIsFavorite = tab.DraftIsFavorite;
+        NotePreviewMode = tab.DraftPreviewMode;
+        NoteSplitPreviewMode = tab.DraftSplitPreviewMode;
+        StatusMessage = tab.Source is null
+            ? _localization.Get("EditingNewSecureNote")
+            : _localization.Format("EditingNoteFormat", tab.Title);
+    }
+
+    private void CaptureSelectedNoteTabViewState()
+    {
+        if (_isLoadingNoteEditor || SelectedNoteTab is null)
+        {
+            return;
+        }
+
+        CaptureNoteEditorState(SelectedNoteTab, markDirty: false);
+    }
+
+    private void CaptureNoteEditorState(NoteEditorTab tab, bool markDirty)
+    {
+        tab.DraftTitle = NoteTitle;
+        tab.DraftContent = NoteContent;
+        tab.DraftTagsText = NoteTagsText;
+        tab.DraftIsMarkdown = NoteIsMarkdown;
+        tab.DraftIsFavorite = NoteIsFavorite;
+        tab.DraftPreviewMode = NotePreviewMode;
+        tab.DraftSplitPreviewMode = NoteSplitPreviewMode;
+        tab.DraftInitialized = true;
+        tab.DraftSelectionStart = Math.Clamp(tab.DraftSelectionStart, 0, NoteContent.Length);
+        tab.DraftSelectionEnd = Math.Clamp(tab.DraftSelectionEnd, 0, NoteContent.Length);
+        tab.Title = string.IsNullOrWhiteSpace(NoteTitle) ? _localization.Get("Untitled") : NoteTitle.Trim();
+        if (markDirty)
+        {
+            tab.IsDirty = true;
+        }
+    }
+
+    private void AppendNoteContentSnippet(string snippet)
+    {
+        var prefix = string.IsNullOrWhiteSpace(NoteContent)
+            ? ""
+            : NoteContent.EndsWith('\n') ? "\n" : "\n\n";
+        NoteContent += prefix + snippet;
+    }
+
+    private void MarkSelectedNoteTabDirty()
+    {
+        if (_isLoadingNoteEditor || SelectedNoteTab is null)
+        {
+            return;
+        }
+
+        CaptureNoteEditorState(SelectedNoteTab, markDirty: true);
+    }
+
+    public void UpdateNoteEditorStatus(int caretIndex, int selectionStart, int selectionEnd)
+    {
+        var text = NoteContent ?? "";
+        caretIndex = Math.Clamp(caretIndex, 0, text.Length);
+        selectionStart = Math.Clamp(selectionStart, 0, text.Length);
+        selectionEnd = Math.Clamp(selectionEnd, 0, text.Length);
+        var line = 1;
+        var column = 1;
+        for (var index = 0; index < caretIndex; index++)
+        {
+            if (text[index] == '\n')
+            {
+                line++;
+                column = 1;
+            }
+            else
+            {
+                column++;
+            }
+        }
+
+        NoteCaretLine = line;
+        NoteCaretColumn = column;
+        NoteSelectedCharacterCount = Math.Abs(selectionEnd - selectionStart);
+        if (!_isLoadingNoteEditor && SelectedNoteTab is not null)
+        {
+            SelectedNoteTab.DraftSelectionStart = selectionStart;
+            SelectedNoteTab.DraftSelectionEnd = selectionEnd;
+        }
+    }
+
+    private async Task RefreshNoteImagePreviewsAsync(string content)
+    {
+        var version = Interlocked.Increment(ref _noteImagePreviewVersion);
+        var imagePaths = NoteContentCodec.ExtractInlineImageIds(content)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (imagePaths.Length == 0)
+        {
+            if (version == _noteImagePreviewVersion)
+            {
+                ReplaceNoteImagePreviews([]);
+            }
+
+            return;
+        }
+
+        var previews = new List<NoteImagePreviewItem>();
+        foreach (var imagePath in imagePaths)
+        {
+            try
+            {
+                var attachment = CreateNoteImageAttachment(imagePath);
+                var contentBytes = await _repository.TryReadAttachmentContentAsync(attachment);
+                if (contentBytes is null || contentBytes.Length == 0)
+                {
+                    continue;
+                }
+
+                using var stream = new MemoryStream(contentBytes);
+                previews.Add(new NoteImagePreviewItem(
+                    imagePath,
+                    BuildNoteImagePreviewName(imagePath, previews.Count + 1),
+                    FormatByteSize(contentBytes.LongLength),
+                    new Bitmap(stream)));
+            }
+            catch (Exception ex)
+            {
+                AppDiagnostics.Error($"Note image preview failed for {imagePath}", ex);
+            }
+        }
+
+        if (version == _noteImagePreviewVersion)
+        {
+            ReplaceNoteImagePreviews(previews);
+        }
+        else
+        {
+            foreach (var preview in previews)
+            {
+                preview.Image.Dispose();
+            }
+        }
+    }
+
+    private Attachment CreateNoteImageAttachment(string imagePath)
+    {
+        var ownerId = SelectedNoteTab?.Source?.Id ?? SelectedNote?.Id ?? 0;
+        return new Attachment
+        {
+            OwnerType = "SECURE_ITEM",
+            OwnerId = ownerId,
+            FileName = BuildNoteImagePreviewName(imagePath, 0),
+            ContentType = InferImageContentType(imagePath),
+            StoragePath = imagePath,
+            SizeBytes = 0,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private void ReplaceNoteImagePreviews(IReadOnlyList<NoteImagePreviewItem> previews)
+    {
+        foreach (var preview in NoteImagePreviewItems)
+        {
+            preview.Image.Dispose();
+        }
+
+        ReplaceItems(NoteImagePreviewItems, previews);
+        OnPropertyChanged(nameof(NoteImagePreviewCount));
+        OnPropertyChanged(nameof(HasNoteImagePreviewItems));
+    }
+
+    private static string BuildNoteImagePreviewName(string imagePath, int fallbackIndex)
+    {
+        var normalized = imagePath.Trim();
+        if (normalized.StartsWith("mdbx:", StringComparison.OrdinalIgnoreCase))
+        {
+            return fallbackIndex > 0 ? $"MDBX image {fallbackIndex}" : "MDBX image";
+        }
+
+        var fileName = Path.GetFileName(normalized.Replace('\\', '/'));
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            return fileName;
+        }
+
+        return fallbackIndex > 0 ? $"Image {fallbackIndex}" : "Image";
+    }
+
+    private static string BuildLineNumbersText(string content)
+    {
+        return string.Join(Environment.NewLine, Enumerable.Range(1, CountNoteLines(content)));
+    }
+
+    private static int CountNoteLines(string content) =>
+        string.IsNullOrEmpty(content)
+            ? 1
+            : content.Count(character => character == '\n') + 1;
+
+    private static int CountNoteWords(string content)
+    {
+        var count = 0;
+        var inAsciiWord = false;
+        foreach (var character in content)
+        {
+            if (IsCjkCharacter(character))
+            {
+                count++;
+                inAsciiWord = false;
+            }
+            else if (char.IsLetterOrDigit(character))
+            {
+                if (!inAsciiWord)
+                {
+                    count++;
+                    inAsciiWord = true;
+                }
+            }
+            else
+            {
+                inAsciiWord = false;
+            }
+        }
+
+        return count;
+    }
+
+    private static bool IsCjkCharacter(char character) =>
+        character is >= '\u3400' and <= '\u9fff' or >= '\uf900' and <= '\ufaff';
+
+    private static IReadOnlyList<NoteOutlineItem> BuildNoteOutlineItems(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        var items = new List<NoteOutlineItem>();
+        var inCodeFence = false;
+        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                inCodeFence = !inCodeFence;
+                continue;
+            }
+
+            if (inCodeFence)
+            {
+                continue;
+            }
+
+            var match = HeadingRegex().Match(line);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var level = match.Groups[1].Value.Length;
+            var title = match.Groups[2].Value.Trim();
+            if (title.Length == 0)
+            {
+                continue;
+            }
+
+            items.Add(new NoteOutlineItem(
+                level,
+                title,
+                index + 1,
+                new Thickness(Math.Min(level - 1, 5) * 12, 0, 0, 0)));
+        }
+
+        return items;
+    }
+
+    private static IReadOnlyList<NoteReferenceItem> BuildNoteReferenceItems(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        var items = new List<NoteReferenceItem>();
+        var inCodeFence = false;
+        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                inCodeFence = !inCodeFence;
+                continue;
+            }
+
+            if (inCodeFence)
+            {
+                continue;
+            }
+
+            var markdownLinkRanges = new List<(int Start, int End)>();
+            foreach (Match match in MarkdownLinkRegex().Matches(line))
+            {
+                var isImage = match.Groups[1].Value == "!";
+                var label = match.Groups[2].Value.Trim();
+                var target = match.Groups[3].Value.Trim();
+                if (string.IsNullOrWhiteSpace(target))
+                {
+                    continue;
+                }
+
+                markdownLinkRanges.Add((match.Index, match.Index + match.Length));
+                items.Add(new NoteReferenceItem(
+                    string.IsNullOrWhiteSpace(label) ? (isImage ? "Image" : target) : label,
+                    target,
+                    index + 1,
+                    isImage));
+            }
+
+            foreach (Match match in BareUrlRegex().Matches(line))
+            {
+                var start = match.Index;
+                if (markdownLinkRanges.Any(range => start >= range.Start && start < range.End))
+                {
+                    continue;
+                }
+
+                var target = match.Value.TrimEnd('.', ',', ';', ':');
+                items.Add(new NoteReferenceItem(target, target, index + 1, IsImageUrl(target)));
+            }
+        }
+
+        return items
+            .DistinctBy(item => (item.Target, item.LineNumber))
+            .ToArray();
+    }
+
+    private static bool IsImageUrl(string target) =>
+        target.StartsWith("monica-image://", StringComparison.OrdinalIgnoreCase) ||
+        target.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+        target.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+        target.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+        target.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ||
+        target.EndsWith(".webp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryCreateExternalReferenceUri(string? target, out Uri uri)
+    {
+        uri = null!;
+        if (string.IsNullOrWhiteSpace(target) ||
+            !Uri.TryCreate(target.Trim(), UriKind.Absolute, out var candidate) ||
+            candidate.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        uri = candidate;
+        return true;
+    }
+
+    [GeneratedRegex("^\\s{0,3}(#{1,6})\\s+(.+?)\\s*#*\\s*$")]
+    private static partial Regex HeadingRegex();
+
+    [GeneratedRegex("(!?)\\[([^\\]]*)\\]\\(([^\\)\\s]+)\\)")]
+    private static partial Regex MarkdownLinkRegex();
+
+    [GeneratedRegex("https?://[^\\s<>()]+")]
+    private static partial Regex BareUrlRegex();
+
+    private static string InferImageContentType(string fileName)
+    {
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+    }
+
     private void ReconcileSecureItemSelectionsAfterLoad()
     {
         if (SelectedNote is not null)
@@ -6485,6 +7813,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         NoteTagsText = "";
         NoteIsMarkdown = true;
         NotePreviewMode = false;
+        NoteSplitPreviewMode = false;
         NoteIsFavorite = false;
     }
 }
