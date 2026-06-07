@@ -4110,7 +4110,7 @@
 
         </Grid>
 
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 IsVisible="{Binding IsUnlocked}"
                 Background="{DynamicResource LayerFillColorDefaultBrush}"
                 BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
