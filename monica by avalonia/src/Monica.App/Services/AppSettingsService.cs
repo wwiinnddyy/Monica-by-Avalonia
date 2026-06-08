@@ -231,7 +231,7 @@ public sealed class AppSettingsService : IAppSettingsService
     private static void Normalize(DesktopAppSettings settings)
     {
         settings.Language = NormalizeChoice(settings.Language, "system", "system", "en-US", "zh-CN");
-        settings.Theme = NormalizeChoice(settings.Theme, "system", "system", "light", "dark");
+        settings.Theme = NormalizeChoice(settings.Theme, "system", "system", "light", "dark", "high-contrast");
         settings.StartupSection = NormalizeChoice(settings.StartupSection, "Passwords", "Passwords", "Notes", "Totp", "Cards", "Generator", "Archive", "RecycleBin", "SecurityAnalysis", "Timeline", "Mdbx", "DatabaseManagement", "Sync", "Settings");
         settings.SyncConflictStrategy = NormalizeChoice(settings.SyncConflictStrategy, "ask", "ask", "local-wins", "remote-wins");
         settings.PasswordSortOrder = NormalizeChoice(settings.PasswordSortOrder, "updated-desc", "updated-desc", "title-asc", "website-asc", "username-asc", "created-desc", "favorites-first");

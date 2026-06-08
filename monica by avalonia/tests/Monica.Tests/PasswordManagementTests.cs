@@ -644,6 +644,7 @@ public sealed class PasswordManagementTests
         await harness.ViewModel.DeleteTotpCommand.ExecuteAsync(harness.ViewModel.TotpItems.Single(item => item.Id == totp.Id));
         await harness.ViewModel.DeleteWalletItemCommand.ExecuteAsync(harness.ViewModel.WalletItems.Single(item => item.Id == wallet.Id));
         await harness.ViewModel.DeleteWebDavBackupCommand.ExecuteAsync(harness.ViewModel.WebDavBackupHistory.Single());
+        await harness.ViewModel.EmptyRecycleBinCommand.ExecuteAsync(null);
 
         await harness.ViewModel.ShowPasswordDetailsCommand.ExecuteAsync(harness.ViewModel.Passwords.Single(item => item.Id == attachmentPassword.Id));
         var details = Assert.IsType<PasswordDetailViewModel>(harness.DetailDialog.LastDetails);
@@ -664,7 +665,69 @@ public sealed class PasswordManagementTests
         Assert.Single(await harness.Repository.GetPasswordHistoryAsync(attachmentPassword.Id));
         Assert.Single(details.Attachments);
         Assert.Single(details.PasswordHistory);
-        Assert.Equal(8, confirmation.Requests.Count);
+        Assert.Equal(9, confirmation.Requests.Count);
+        Assert.Equal(3, confirmation.TypedRequests.Count);
+        Assert.Contains(confirmation.TypedRequests, request =>
+            request.Title == harness.ViewModel.L.Get("DeletePermanentlyConfirmationTitle") &&
+            request.RequiredPhrase == harness.ViewModel.L.Get("PermanentDeleteConfirmationPhrase"));
+        Assert.Contains(confirmation.TypedRequests, request =>
+            request.Title == harness.ViewModel.L.Get("DeleteWebDavBackupConfirmationTitle") &&
+            request.RequiredPhrase == harness.ViewModel.L.Get("DeleteWebDavBackupConfirmationPhrase"));
+        Assert.Contains(confirmation.TypedRequests, request =>
+            request.Title == harness.ViewModel.L.Get("EmptyRecycleBinConfirmationTitle") &&
+            request.RequiredPhrase == harness.ViewModel.L.Get("EmptyRecycleBinConfirmationPhrase"));
+    }
+
+    [Fact]
+    public async Task Empty_recycle_bin_requires_typed_confirmation_and_purges_deleted_passwords()
+    {
+        var confirmation = new FakeConfirmationDialogService();
+        var harness = CreateHarness(confirmationDialogService: confirmation);
+        harness.Crypto.InitializeSession("correct password", new byte[16]);
+
+        var first = new PasswordEntry { Title = "Deleted one", Password = harness.Crypto.EncryptString("one") };
+        var second = new PasswordEntry { Title = "Deleted two", Password = harness.Crypto.EncryptString("two") };
+        await harness.Repository.SavePasswordAsync(first);
+        await harness.Repository.SavePasswordAsync(second);
+        await harness.Repository.SoftDeletePasswordAsync(first.Id);
+        await harness.Repository.SoftDeletePasswordAsync(second.Id);
+        await harness.ViewModel.LoadAsync();
+
+        await harness.ViewModel.EmptyRecycleBinCommand.ExecuteAsync(null);
+
+        Assert.Empty(harness.ViewModel.DeletedPasswords);
+        Assert.Empty(await harness.Repository.GetPasswordsAsync(includeDeleted: true));
+        Assert.Equal(
+            harness.ViewModel.L.Format("EmptiedRecycleBinFormat", 2),
+            harness.ViewModel.StatusMessage);
+        Assert.Contains(confirmation.TypedRequests, request =>
+            request.Title == harness.ViewModel.L.Get("EmptyRecycleBinConfirmationTitle") &&
+            request.RequiredPhrase == harness.ViewModel.L.Get("EmptyRecycleBinConfirmationPhrase"));
+        Assert.Contains(harness.ViewModel.TimelineEntries, item => item.OperationType == "PURGE" && item.Title == first.Title);
+        Assert.Contains(harness.ViewModel.TimelineEntries, item => item.OperationType == "PURGE" && item.Title == second.Title);
+    }
+
+    [Fact]
+    public void ViewModel_recoverable_status_requires_unlocked_failed_nonloading_state()
+    {
+        var harness = CreateHarness();
+
+        harness.ViewModel.StatusMessage = "Vault load failed";
+
+        Assert.False(harness.ViewModel.HasRecoverableStatusMessage);
+
+        harness.ViewModel.IsUnlocked = true;
+        harness.ViewModel.IsLoadingVault = true;
+
+        Assert.False(harness.ViewModel.HasRecoverableStatusMessage);
+
+        harness.ViewModel.IsLoadingVault = false;
+
+        Assert.True(harness.ViewModel.HasRecoverableStatusMessage);
+
+        harness.ViewModel.StatusMessage = "Vault unlocked";
+
+        Assert.False(harness.ViewModel.HasRecoverableStatusMessage);
     }
 
     [Fact]
@@ -1462,6 +1525,77 @@ public sealed class PasswordManagementTests
         Assert.Empty(await harness.Repository.GetSecureItemsAsync(VaultItemType.Totp));
         Assert.Single(await harness.Repository.GetSecureItemsAsync(VaultItemType.Totp, includeDeleted: true));
         Assert.Equal(harness.ViewModel.L.Format("MovedSelectedTotpToRecycleBinFormat", 1), harness.ViewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task ViewModel_filters_totp_console_by_group_favorite_unbound_and_search()
+    {
+        var harness = CreateHarness();
+        var boundPassword = new PasswordEntry
+        {
+            Title = "GitHub work",
+            Username = "dev@example.com",
+            Password = "secret",
+            AuthenticatorKey = "otpauth://totp/GitHub:dev@example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"
+        };
+        await harness.Repository.SavePasswordAsync(boundPassword);
+        await harness.Repository.SaveSecureItemAsync(new SecureItem
+        {
+            ItemType = VaultItemType.Totp,
+            Title = "GitHub personal",
+            Notes = "primary account",
+            IsFavorite = true,
+            ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "GitHub", "personal@example.com"))
+        });
+        await harness.Repository.SaveSecureItemAsync(new SecureItem
+        {
+            ItemType = VaultItemType.Totp,
+            Title = "Azure admin",
+            Notes = "tenant owner",
+            ItemData = TotpDataResolver.ToItemData(new TotpData("JBSWY3DPEHPK3PXP", "Microsoft", "azure@example.com"))
+        });
+
+        await harness.ViewModel.LoadAsync();
+
+        Assert.Equal(3, harness.ViewModel.TotpItems.Count);
+        Assert.Equal(3, harness.ViewModel.FilteredTotpItems.Count);
+        Assert.Contains(harness.ViewModel.TotpFilterChoices, item => item.Key == "all" && item.Count == 3 && item.IsSelected);
+        Assert.Contains(harness.ViewModel.TotpFilterChoices, item => item.Key == "favorites" && item.Count == 1);
+        Assert.Contains(harness.ViewModel.TotpFilterChoices, item => item.Key == "unbound" && item.Count == 2);
+        Assert.Contains(harness.ViewModel.TotpFilterChoices, item => item.Key == "issuer:GitHub" && item.Count == 2);
+
+        harness.ViewModel.SelectTotpFilterCommand.Execute("favorites");
+
+        var favorite = Assert.Single(harness.ViewModel.FilteredTotpItems);
+        Assert.Equal("GitHub personal", favorite.Title);
+        Assert.Equal(favorite.Id, harness.ViewModel.SelectedTotpItem?.Id);
+
+        harness.ViewModel.SelectTotpFilterCommand.Execute("unbound");
+
+        Assert.Equal(2, harness.ViewModel.FilteredTotpItems.Count);
+        Assert.DoesNotContain(harness.ViewModel.FilteredTotpItems, item => item.BoundPasswordId == boundPassword.Id);
+
+        harness.ViewModel.SelectTotpFilterCommand.Execute("issuer:GitHub");
+
+        Assert.Equal(2, harness.ViewModel.FilteredTotpItems.Count);
+        Assert.All(harness.ViewModel.FilteredTotpItems, item => Assert.Contains("GitHub", item.Title));
+
+        harness.ViewModel.SelectTotpFilterCommand.Execute("all");
+        harness.ViewModel.SearchText = "azure";
+
+        var searched = Assert.Single(harness.ViewModel.FilteredTotpItems);
+        Assert.Equal("Azure admin", searched.Title);
+
+        harness.ViewModel.SearchText = "missing authenticator";
+
+        Assert.False(harness.ViewModel.HasFilteredTotpItems);
+        Assert.True(harness.ViewModel.HasTotpFilterOrSearch);
+
+        harness.ViewModel.ClearTotpFiltersCommand.Execute(null);
+
+        Assert.Equal("", harness.ViewModel.SearchText);
+        Assert.Equal(3, harness.ViewModel.FilteredTotpItems.Count);
+        Assert.Contains(harness.ViewModel.TotpFilterChoices, item => item.Key == "all" && item.IsSelected);
     }
 
     [Fact]
@@ -2540,6 +2674,40 @@ public sealed class PasswordManagementTests
         Assert.Contains(harness.ViewModel.GeneratedPassword, char.IsDigit);
         Assert.Equal(harness.ViewModel.GeneratedPassword, harness.Clipboard.Text);
         Assert.Contains("5", harness.ViewModel.GeneratedPasswordStrengthText);
+        Assert.True(harness.ViewModel.HasGeneratedPasswordHistory);
+        Assert.Equal(harness.ViewModel.GeneratedPassword, harness.ViewModel.GeneratedPasswordHistory.First().Value);
+    }
+
+    [Fact]
+    public void ViewModel_generator_supports_templates_modes_and_history_reuse()
+    {
+        var harness = CreateHarness();
+        const string similarCharacters = "0OolI1|`";
+
+        harness.ViewModel.GeneratorExcludeSimilarCharacters = true;
+        harness.ViewModel.GeneratorLength = 64;
+        harness.ViewModel.GeneratePasswordCommand.Execute(null);
+
+        Assert.DoesNotContain(harness.ViewModel.GeneratedPassword, similarCharacters.Contains);
+
+        harness.ViewModel.GeneratorTemplate = "pin";
+        harness.ViewModel.GeneratePasswordCommand.Execute(null);
+
+        Assert.Equal(6, harness.ViewModel.GeneratedPassword.Length);
+        Assert.All(harness.ViewModel.GeneratedPassword, character => Assert.True(char.IsDigit(character)));
+
+        harness.ViewModel.GeneratorTemplate = "memorable";
+        harness.ViewModel.GeneratorWordCount = 5;
+        harness.ViewModel.GeneratePasswordCommand.Execute(null);
+
+        Assert.Equal("passphrase", harness.ViewModel.GeneratorMode);
+        Assert.True(harness.ViewModel.GeneratedPassword.Count(character => character == '-') >= 4);
+
+        var historyItem = harness.ViewModel.GeneratedPasswordHistory.Last();
+        harness.ViewModel.UseGeneratedPasswordHistoryItemCommand.Execute(historyItem);
+
+        Assert.Equal(historyItem.Value, harness.ViewModel.GeneratedPassword);
+        Assert.True(harness.ViewModel.GeneratedPasswordHistory.Count <= 8);
     }
 
     [Fact]
@@ -3068,6 +3236,7 @@ public sealed class PasswordManagementTests
     private sealed class FakeConfirmationDialogService(bool result = true) : IConfirmationDialogService
     {
         public List<(string Title, string Message, string PrimaryButtonText)> Requests { get; } = [];
+        public List<(string Title, string RequiredPhrase)> TypedRequests { get; } = [];
 
         public bool Result { get; set; } = result;
 
@@ -3079,6 +3248,20 @@ public sealed class PasswordManagementTests
             CancellationToken cancellationToken = default)
         {
             Requests.Add((title, message, primaryButtonText));
+            return Task.FromResult(Result);
+        }
+
+        public Task<bool> ConfirmTypedAsync(
+            string title,
+            string message,
+            string requiredPhrase,
+            string instruction,
+            string primaryButtonText,
+            string? closeButtonText = null,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add((title, $"{message}\n{instruction}", primaryButtonText));
+            TypedRequests.Add((title, requiredPhrase));
             return Task.FromResult(Result);
         }
     }

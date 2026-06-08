@@ -80,6 +80,21 @@ public sealed class AppSettingsTests
     }
 
     [Fact]
+    public async Task App_settings_allows_high_contrast_theme()
+    {
+        var path = GetTempPath();
+        var settings = new AppSettingsService(path);
+        await settings.LoadAsync();
+        settings.Current.Theme = "high-contrast";
+        await settings.SaveAsync();
+
+        var reloaded = new AppSettingsService(path);
+        await reloaded.LoadAsync();
+
+        Assert.Equal("high-contrast", reloaded.Current.Theme);
+    }
+
+    [Fact]
     public async Task App_settings_allows_security_analysis_startup_section()
     {
         var path = GetTempPath();
@@ -194,6 +209,24 @@ public sealed class AppSettingsTests
         Assert.True(reloaded.Current.WebDavEnabled);
         Assert.Equal("https://dav.example.com", reloaded.Current.WebDavServerUrl);
         Assert.False(reloaded.IsFeatureEnabled("passwords"));
+    }
+
+    [Fact]
+    public async Task ViewModel_exposes_high_contrast_theme_option()
+    {
+        var settingsPath = GetTempPath();
+        var settingsService = new AppSettingsService(settingsPath);
+        await settingsService.LoadAsync();
+        settingsService.Current.Theme = "high-contrast";
+        await settingsService.SaveAsync();
+
+        var viewModel = CreateViewModel(settingsPath);
+        await viewModel.InitializeAsync();
+
+        Assert.Equal("high-contrast", viewModel.SettingsTheme);
+        Assert.Contains(viewModel.ThemeOptions, option =>
+            string.Equals(option.Value?.ToString(), "high-contrast", StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(option.Label));
     }
 
     [Fact]

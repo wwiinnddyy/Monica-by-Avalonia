@@ -20,7 +20,11 @@ public interface ILocalizationService : INotifyPropertyChanged
     string Generator { get; }
     string Archive { get; }
     string RecycleBin { get; }
+    string ArchiveEmptyHint { get; }
+    string RecycleBinEmptyHint { get; }
     string Timeline { get; }
+    string TimelineEmptyHint { get; }
+    string TimelineEmptySelectionHint { get; }
     string SecurityAnalysis { get; }
     string SecurityAnalysisSubtitle { get; }
     string SecurityScore { get; }
@@ -96,6 +100,7 @@ public interface ILocalizationService : INotifyPropertyChanged
     string MoreOptions { get; }
     string RestorePassword { get; }
     string DeletePermanently { get; }
+    string EmptyRecycleBin { get; }
     string Delete { get; }
     string Select { get; }
     string Save { get; }
@@ -219,6 +224,7 @@ public interface ILocalizationService : INotifyPropertyChanged
     string MdbxLastSynced { get; }
     string RegisteredMdbxVaults { get; }
     string NoMdbxVaults { get; }
+    string MdbxEmptyHint { get; }
     string Default { get; }
     string LocalPath { get; }
     string SetDefault { get; }
@@ -235,6 +241,7 @@ public interface ILocalizationService : INotifyPropertyChanged
     string ExternalDatabasesDescription { get; }
     string MdbxDatabaseCount { get; }
     string RegisteredDatabases { get; }
+    string DatabaseSourcesEmptyHint { get; }
     string WebDavConnection { get; }
     string SyncOverview { get; }
     string SyncConfiguration { get; }
@@ -282,6 +289,14 @@ public interface ILocalizationService : INotifyPropertyChanged
     string Generate { get; }
     string SaveAsLogin { get; }
     string GeneratorLength { get; }
+    string GeneratorMode { get; }
+    string GeneratorTemplate { get; }
+    string GeneratorWordCount { get; }
+    string ExcludeSimilarCharacters { get; }
+    string RecentGeneratedPasswords { get; }
+    string NoGeneratedPasswordHistory { get; }
+    string UsePassword { get; }
+    string Reset { get; }
     string ShowPassword { get; }
     string HidePassword { get; }
     string AddPasswordRow { get; }
@@ -459,7 +474,11 @@ public sealed class LocalizationService : ILocalizationService
     public string Generator => Text();
     public string Archive => Text();
     public string RecycleBin => Text();
+    public string ArchiveEmptyHint => Text();
+    public string RecycleBinEmptyHint => Text();
     public string Timeline => Text();
+    public string TimelineEmptyHint => Text();
+    public string TimelineEmptySelectionHint => Text();
     public string SecurityAnalysis => Text();
     public string SecurityAnalysisSubtitle => Text();
     public string SecurityScore => Text();
@@ -535,6 +554,7 @@ public sealed class LocalizationService : ILocalizationService
     public string MoreOptions => Text();
     public string RestorePassword => Text();
     public string DeletePermanently => Text();
+    public string EmptyRecycleBin => Text();
     public string Delete => Text();
     public string Select => Text();
     public string Save => Text();
@@ -658,6 +678,7 @@ public sealed class LocalizationService : ILocalizationService
     public string MdbxLastSynced => Text();
     public string RegisteredMdbxVaults => Text();
     public string NoMdbxVaults => Text();
+    public string MdbxEmptyHint => Text();
     public string Default => Text();
     public string LocalPath => Text();
     public string SetDefault => Text();
@@ -674,6 +695,7 @@ public sealed class LocalizationService : ILocalizationService
     public string ExternalDatabasesDescription => Text();
     public string MdbxDatabaseCount => Text();
     public string RegisteredDatabases => Text();
+    public string DatabaseSourcesEmptyHint => Text();
     public string WebDavConnection => Text();
     public string SyncOverview => Text();
     public string SyncConfiguration => Text();
@@ -721,6 +743,14 @@ public sealed class LocalizationService : ILocalizationService
     public string Generate => Text();
     public string SaveAsLogin => Text();
     public string GeneratorLength => Text();
+    public string GeneratorMode => Text();
+    public string GeneratorTemplate => Text();
+    public string GeneratorWordCount => Text();
+    public string ExcludeSimilarCharacters => Text();
+    public string RecentGeneratedPasswords => Text();
+    public string NoGeneratedPasswordHistory => Text();
+    public string UsePassword => Text();
+    public string Reset => Text();
     public string ShowPassword => Text();
     public string HidePassword => Text();
     public string AddPasswordRow => Text();
@@ -884,7 +914,11 @@ public sealed class LocalizationService : ILocalizationService
         ["Generator"] = "Generator",
         ["Archive"] = "Archive",
         ["RecycleBin"] = "Recycle Bin",
+        ["ArchiveEmptyHint"] = "Archived passwords will appear here. Return to Passwords when you want to archive an item first.",
+        ["RecycleBinEmptyHint"] = "Deleted passwords will appear here before permanent removal. Return to Passwords to manage active items.",
         ["Timeline"] = "Timeline",
+        ["TimelineEmptyHint"] = "Activity will appear after vault changes such as create, restore, import, sync, or permanent delete.",
+        ["TimelineEmptySelectionHint"] = "Select an event to inspect its timestamp, item type, and operation details.",
         ["SecurityAnalysis"] = "Security Analysis",
         ["SecurityAnalysisSubtitle"] = "Local checks for weak, reused, duplicate, stale, unprotected, and known-compromised password records.",
         ["SecurityIssueCountFormat"] = "{0} issue(s) found",
@@ -977,8 +1011,17 @@ public sealed class LocalizationService : ILocalizationService
         ["DeleteSelectedItemsConfirmationMessageFormat"] = "Move {0} selected item(s) to the recycle bin? You can restore them later from Recycle Bin.",
         ["DeletePermanentlyConfirmationTitle"] = "Delete permanently?",
         ["DeletePermanentlyConfirmationMessageFormat"] = "Permanently delete \"{0}\"? This cannot be undone.",
+        ["PermanentDeleteConfirmationPhrase"] = "DELETE PERMANENTLY",
+        ["PermanentDeleteConfirmationInstructionFormat"] = "Type \"{0}\" to enable permanent deletion.",
+        ["EmptyRecycleBin"] = "Empty recycle bin",
+        ["EmptyRecycleBinConfirmationTitle"] = "Empty recycle bin?",
+        ["EmptyRecycleBinConfirmationMessageFormat"] = "Permanently delete all {0} item(s) in the recycle bin? This cannot be undone.",
+        ["EmptyRecycleBinConfirmationPhrase"] = "EMPTY RECYCLE BIN",
+        ["EmptyRecycleBinConfirmationInstructionFormat"] = "Type \"{0}\" to permanently delete every item in the recycle bin.",
         ["DeleteWebDavBackupConfirmationTitle"] = "Delete WebDAV backup?",
         ["DeleteWebDavBackupConfirmationMessageFormat"] = "Delete remote backup \"{0}\"? This cannot be undone.",
+        ["DeleteWebDavBackupConfirmationPhrase"] = "DELETE REMOTE BACKUP",
+        ["DeleteWebDavBackupConfirmationInstructionFormat"] = "Type \"{0}\" to delete this remote backup.",
         ["DeleteFolderConfirmationTitle"] = "Delete folder?",
         ["DeleteFolderConfirmationMessageFormat"] = "Delete folder \"{0}\"? {1} password(s) will be moved to No folder.",
         ["DeleteAttachmentConfirmationTitle"] = "Delete attachment?",
@@ -1090,6 +1133,23 @@ public sealed class LocalizationService : ILocalizationService
         ["AddAuthenticator"] = "Add Authenticator",
         ["EditAuthenticator"] = "Edit Authenticator",
         ["TotpPageDescription"] = "TOTP authenticators with copy, edit, favorite, delete, context menu, and batch actions.",
+        ["TotpEmptyHint"] = "Add an authenticator by scanning a QR code or entering a Base32 secret manually.",
+        ["TotpConsoleStatusFormat"] = "{0} authenticators · {1} expiring soon",
+        ["TotpFilteredStatusFormat"] = "{0} visible · {1} total",
+        ["TotpScanQr"] = "Scan QR",
+        ["TotpManualAdd"] = "Manual add",
+        ["TotpScanQrFallback"] = "QR scanning will open the authenticator entry dialog on this desktop build.",
+        ["TotpFilterTitle"] = "Groups",
+        ["TotpIssuerGroups"] = "Issuers",
+        ["TotpFilterAll"] = "All",
+        ["TotpFilterExpiringSoon"] = "Expiring soon",
+        ["TotpFilterUnbound"] = "Unbound password",
+        ["TotpNoFilteredResults"] = "No authenticators match the current search or group.",
+        ["ClearTotpFilters"] = "Clear filters",
+        ["ClearedTotpFilters"] = "Cleared authenticator filters",
+        ["MoreActions"] = "More actions",
+        ["ShowHidden"] = "Show hidden",
+        ["Help"] = "Help",
         ["AdvancedTotpOptions"] = "Advanced options",
         ["TotpSecretHint"] = "Paste a Base32 secret or otpauth URI. Monica stores the normalized TOTP metadata in the local vault.",
         ["TotpTypeTotp"] = "TOTP (time based)",
@@ -1149,6 +1209,7 @@ public sealed class LocalizationService : ILocalizationService
         ["MdbxLastSynced"] = "Last synced",
         ["RegisteredMdbxVaults"] = "Registered MDBX vaults",
         ["NoMdbxVaults"] = "No MDBX vault metadata has been registered yet.",
+        ["MdbxEmptyHint"] = "Create a local MDBX working copy or configure a remote MDBX source to start using the encrypted business store.",
         ["Default"] = "Default",
         ["LocalPath"] = "Local path",
         ["SetDefault"] = "Set default",
@@ -1165,6 +1226,7 @@ public sealed class LocalizationService : ILocalizationService
         ["ExternalDatabasesDescription"] = "KeePass KDBX, MDBX, Bitwarden and WebDAV sources are exposed through platform-neutral services.",
         ["MdbxDatabaseCount"] = "MDBX vault metadata",
         ["RegisteredDatabases"] = "Registered databases",
+        ["DatabaseSourcesEmptyHint"] = "Database source records will appear here after local MDBX, WebDAV, OneDrive, or migration metadata is registered.",
         ["WebDavConnection"] = "WebDAV connection",
         ["SyncOverview"] = "Sync overview",
         ["SyncConfiguration"] = "Sync configuration",
@@ -1229,6 +1291,26 @@ public sealed class LocalizationService : ILocalizationService
         ["SaveAsLogin"] = "Save as Login",
         ["GeneratorLength"] = "Length",
         ["GeneratorLengthFormat"] = "Length: {0}",
+        ["GeneratorMode"] = "Type",
+        ["GeneratorTemplate"] = "Template",
+        ["GeneratorWordCount"] = "Words",
+        ["GeneratorWordCountFormat"] = "Words: {0}",
+        ["GeneratorModeRandom"] = "Random password",
+        ["GeneratorModePassphrase"] = "Passphrase",
+        ["GeneratorModePin"] = "PIN",
+        ["GeneratorModeUsername"] = "Username",
+        ["GeneratorTemplateBalanced"] = "Balanced",
+        ["GeneratorTemplateMaximum"] = "Maximum strength",
+        ["GeneratorTemplateMemorable"] = "Memorable",
+        ["GeneratorTemplatePin"] = "Short PIN",
+        ["GeneratorTemplateUsername"] = "Username",
+        ["GeneratorStrategyLengthFormat"] = "{0} · {1} chars",
+        ["GeneratorStrategyPassphraseFormat"] = "{0} · {1} words",
+        ["ExcludeSimilarCharacters"] = "Exclude similar characters",
+        ["RecentGeneratedPasswords"] = "Recent generated",
+        ["NoGeneratedPasswordHistory"] = "Generated passwords will appear here during this session.",
+        ["UsePassword"] = "Use password",
+        ["Reset"] = "Reset",
         ["ShowPassword"] = "Show password",
         ["HidePassword"] = "Hide password",
         ["AddPasswordRow"] = "Add another password",
@@ -1250,6 +1332,7 @@ public sealed class LocalizationService : ILocalizationService
         ["GeneratorNoPassword"] = "Generate a password to see its strength.",
         ["GeneratedPasswordStrengthFormat"] = "{0} ({1}/5). {2}",
         ["CopiedGeneratedPassword"] = "Copied generated password",
+        ["GeneratedPasswordRestoredFromHistory"] = "Restored generated password from history",
         ["SecureNotesDescription"] = "Notes are stored as secure_items with NOTE item type and share the same encryption, folder, KeePass, Bitwarden and MDBX ownership model.",
         ["CreateSecureItem"] = "Create Secure Item",
         ["NewSecureNote"] = "New Note",
@@ -1266,7 +1349,7 @@ public sealed class LocalizationService : ILocalizationService
         ["Language"] = "Language",
         ["LanguageDescription"] = "Choose the display language used by Monica desktop.",
         ["Theme"] = "Theme",
-        ["ThemeDescription"] = "Follow the system theme or force a light or dark appearance.",
+        ["ThemeDescription"] = "Follow the system theme, force light or dark, or use a high contrast appearance.",
         ["StartupView"] = "Startup view",
         ["StartupViewDescription"] = "Choose the first page shown after the vault is unlocked.",
         ["Security"] = "Security",
@@ -1456,6 +1539,7 @@ public sealed class LocalizationService : ILocalizationService
         ["SimplifiedChinese"] = "Simplified Chinese",
         ["Light"] = "Light",
         ["Dark"] = "Dark",
+        ["HighContrast"] = "High contrast",
         ["AskEveryTime"] = "Ask every time",
         ["LocalWins"] = "Local wins",
         ["RemoteWins"] = "Remote wins",
@@ -1604,6 +1688,7 @@ public sealed class LocalizationService : ILocalizationService
         ["CopiedWebsiteFormat"] = "Copied website for {0}",
         ["CopiedTotpFormat"] = "Copied TOTP for {0}",
         ["CopiedFieldFormat"] = "Copied {0}",
+        ["CopiedWalletFieldFormat"] = "Copied {0}",
         ["CopiedPasswordHistory"] = "Copied historical password",
         ["DeletedPasswordHistoryEntry"] = "Deleted password history entry",
         ["ClearedPasswordHistory"] = "Cleared password history",
@@ -1633,6 +1718,7 @@ public sealed class LocalizationService : ILocalizationService
         ["RenamedFolderFormat"] = "Renamed folder {0} to {1}",
         ["DeletedFolderFormat"] = "Deleted folder {0}; moved {1} passwords to No folder",
         ["DeletedPasswordPermanentlyFormat"] = "Permanently deleted {0}",
+        ["EmptiedRecycleBinFormat"] = "Permanently deleted {0} recycle bin item(s)",
         ["AddedAttachmentFormat"] = "Added {0} to {1}",
         ["DeletedAttachmentFormat"] = "Deleted attachment {0}",
         ["AttachmentAddedRefreshDetails"] = "Attachment added. Reopen details to see the encrypted file metadata.",
@@ -1665,6 +1751,8 @@ public sealed class LocalizationService : ILocalizationService
         ["ExportedPasswordCsv"] = "Prepared password CSV export preview",
         ["ExportedTotpCsv"] = "Prepared TOTP CSV export preview",
         ["ExportedNoteCsv"] = "Prepared notes CSV export preview",
+        ["ExportedTimelineFormat"] = "Exported {0} timeline entries",
+        ["TimelineExportEmpty"] = "No timeline entries to export",
         ["ExportedAegisJson"] = "Prepared Aegis JSON export preview",
         ["SavedExportFileFormat"] = "Saved export to {0}.",
         ["SaveExportFileFailedFormat"] = "Save export failed: {0}",
@@ -1686,7 +1774,11 @@ public sealed class LocalizationService : ILocalizationService
         ["Generator"] = "生成器",
         ["Archive"] = "归档",
         ["RecycleBin"] = "回收站",
+        ["ArchiveEmptyHint"] = "归档的密码会显示在这里。需要先回到密码库选择条目并归档。",
+        ["RecycleBinEmptyHint"] = "删除的密码会先显示在这里，确认后才会永久移除。需要管理当前条目时请回到密码库。",
         ["Timeline"] = "时间线",
+        ["TimelineEmptyHint"] = "创建、恢复、导入、同步或永久删除等保险库操作发生后，活动记录会显示在这里。",
+        ["TimelineEmptySelectionHint"] = "选择一条事件后，可以查看时间、项目类型和操作详情。",
         ["SecurityAnalysis"] = "安全分析",
         ["SecurityAnalysisSubtitle"] = "本地检查弱密码、复用密码、重复网站、过期密码、未受保护记录和已泄露密码。",
         ["SecurityIssueCountFormat"] = "{0} 个问题",
@@ -1760,6 +1852,14 @@ public sealed class LocalizationService : ILocalizationService
         ["SortUsername"] = "用户名",
         ["SortCreated"] = "最近创建",
         ["SortFavorites"] = "收藏优先",
+        ["QuickFilterFavorite"] = "收藏",
+        ["QuickFilter2Fa"] = "两步验证",
+        ["QuickFilterNotes"] = "笔记",
+        ["QuickFilterPasskey"] = "通行密钥",
+        ["QuickFilterBoundNote"] = "已绑定笔记",
+        ["QuickFilterUncategorized"] = "未分类",
+        ["QuickFilterLocalOnly"] = "仅本地",
+        ["QuickFilterAttachments"] = "附件",
         ["MoreOptions"] = "更多操作",
         ["MoveToRecycleBin"] = "移到回收站",
         ["BatchFavorite"] = "收藏所选",
@@ -1784,8 +1884,17 @@ public sealed class LocalizationService : ILocalizationService
         ["DeleteSelectedItemsConfirmationMessageFormat"] = "要将 {0} 个选中的项目移到回收站吗？之后可以从回收站恢复。",
         ["DeletePermanentlyConfirmationTitle"] = "永久删除？",
         ["DeletePermanentlyConfirmationMessageFormat"] = "要永久删除“{0}”吗？此操作无法撤销。",
+        ["PermanentDeleteConfirmationPhrase"] = "永久删除",
+        ["PermanentDeleteConfirmationInstructionFormat"] = "请输入“{0}”以启用永久删除。",
+        ["EmptyRecycleBin"] = "清空回收站",
+        ["EmptyRecycleBinConfirmationTitle"] = "清空回收站？",
+        ["EmptyRecycleBinConfirmationMessageFormat"] = "要永久删除回收站中的全部 {0} 个项目吗？此操作无法撤销。",
+        ["EmptyRecycleBinConfirmationPhrase"] = "清空回收站",
+        ["EmptyRecycleBinConfirmationInstructionFormat"] = "请输入“{0}”以永久删除回收站中的全部项目。",
         ["DeleteWebDavBackupConfirmationTitle"] = "删除 WebDAV 备份？",
         ["DeleteWebDavBackupConfirmationMessageFormat"] = "要删除远端备份“{0}”吗？此操作无法撤销。",
+        ["DeleteWebDavBackupConfirmationPhrase"] = "删除远端备份",
+        ["DeleteWebDavBackupConfirmationInstructionFormat"] = "请输入“{0}”以删除此远端备份。",
         ["DeleteFolderConfirmationTitle"] = "删除文件夹？",
         ["DeleteFolderConfirmationMessageFormat"] = "要删除文件夹“{0}”吗？{1} 个密码会移动到无文件夹。",
         ["DeleteAttachmentConfirmationTitle"] = "删除附件？",
@@ -1869,6 +1978,23 @@ public sealed class LocalizationService : ILocalizationService
         ["AddAuthenticator"] = "添加验证器",
         ["EditAuthenticator"] = "编辑验证器",
         ["TotpPageDescription"] = "管理动态口令：复制、编辑、收藏、删除和批量操作都在此完成。",
+        ["TotpEmptyHint"] = "可以扫描二维码或手动输入 Base32 密钥来添加动态口令。",
+        ["TotpConsoleStatusFormat"] = "{0} 个验证器 · {1} 个即将过期",
+        ["TotpFilteredStatusFormat"] = "显示 {0} 个 · 共 {1} 个",
+        ["TotpScanQr"] = "扫描二维码",
+        ["TotpManualAdd"] = "手动添加",
+        ["TotpScanQrFallback"] = "当前桌面版会打开验证器录入对话框，后续可接入真实二维码扫描。",
+        ["TotpFilterTitle"] = "分组",
+        ["TotpIssuerGroups"] = "发行方",
+        ["TotpFilterAll"] = "全部",
+        ["TotpFilterExpiringSoon"] = "即将过期",
+        ["TotpFilterUnbound"] = "未绑定密码",
+        ["TotpNoFilteredResults"] = "当前搜索或分组下没有匹配的验证器。",
+        ["ClearTotpFilters"] = "清除筛选",
+        ["ClearedTotpFilters"] = "已清除验证器筛选",
+        ["MoreActions"] = "更多操作",
+        ["ShowHidden"] = "显示隐藏项",
+        ["Help"] = "帮助",
         ["AdvancedTotpOptions"] = "高级选项",
         ["TotpSecretHint"] = "粘贴 Base32 密钥或 otpauth URI。Monica 会把规范化后的动态口令元数据保存在本地保险库。",
         ["TotpCode"] = "动态口令",
@@ -1922,6 +2048,7 @@ public sealed class LocalizationService : ILocalizationService
         ["MdbxLastSynced"] = "上次同步",
         ["RegisteredMdbxVaults"] = "已登记 MDBX 保险库",
         ["NoMdbxVaults"] = "还没有登记 MDBX 保险库元数据。",
+        ["MdbxEmptyHint"] = "创建本地 MDBX 工作副本，或配置远程 MDBX 来源，以开始使用加密业务存储。",
         ["Default"] = "默认",
         ["LocalPath"] = "本地路径",
         ["SetDefault"] = "设为默认",
@@ -1938,6 +2065,7 @@ public sealed class LocalizationService : ILocalizationService
         ["ExternalDatabasesDescription"] = "KeePass KDBX、MDBX、Bitwarden 与 WebDAV 来源通过平台无关服务接入。",
         ["MdbxDatabaseCount"] = "MDBX 保险库元数据",
         ["RegisteredDatabases"] = "已登记数据库",
+        ["DatabaseSourcesEmptyHint"] = "登记本地 MDBX、WebDAV、OneDrive 或迁移元数据后，数据库来源会显示在这里。",
         ["WebDavConnection"] = "WebDAV 连接",
         ["SyncOverview"] = "同步概览",
         ["SyncConfiguration"] = "同步配置",
@@ -2002,6 +2130,26 @@ public sealed class LocalizationService : ILocalizationService
         ["SaveAsLogin"] = "保存为登录项",
         ["GeneratorLength"] = "长度",
         ["GeneratorLengthFormat"] = "长度：{0}",
+        ["GeneratorMode"] = "类型",
+        ["GeneratorTemplate"] = "模板",
+        ["GeneratorWordCount"] = "词数",
+        ["GeneratorWordCountFormat"] = "词数：{0}",
+        ["GeneratorModeRandom"] = "随机密码",
+        ["GeneratorModePassphrase"] = "口令短语",
+        ["GeneratorModePin"] = "PIN",
+        ["GeneratorModeUsername"] = "用户名",
+        ["GeneratorTemplateBalanced"] = "均衡",
+        ["GeneratorTemplateMaximum"] = "最高强度",
+        ["GeneratorTemplateMemorable"] = "易记",
+        ["GeneratorTemplatePin"] = "短 PIN",
+        ["GeneratorTemplateUsername"] = "用户名",
+        ["GeneratorStrategyLengthFormat"] = "{0} · {1} 个字符",
+        ["GeneratorStrategyPassphraseFormat"] = "{0} · {1} 个词",
+        ["ExcludeSimilarCharacters"] = "排除相似字符",
+        ["RecentGeneratedPasswords"] = "最近生成",
+        ["NoGeneratedPasswordHistory"] = "本次会话生成的密码会显示在这里。",
+        ["UsePassword"] = "使用密码",
+        ["Reset"] = "重置",
         ["ShowPassword"] = "显示密码",
         ["HidePassword"] = "隐藏密码",
         ["AddPasswordRow"] = "添加另一个密码",
@@ -2022,6 +2170,7 @@ public sealed class LocalizationService : ILocalizationService
         ["PasswordStrengthWarningSymbols"] = "添加符号。",
         ["GeneratorNoPassword"] = "生成或输入密码后查看强度。",
         ["GeneratedPasswordStrengthFormat"] = "{0}（{1}/5）。{2}",
+        ["GeneratedPasswordRestoredFromHistory"] = "已从历史恢复生成结果",
         ["SecureNotesDescription"] = "笔记以 NOTE 类型存储在 secure_items 中，并共享同一套加密、文件夹、KeePass、Bitwarden 和 MDBX 归属模型。",
         ["CreateSecureItem"] = "创建安全项目",
         ["SettingsSubtitle"] = "配置 Monica 桌面端的行为、安全、外观和集成选项。",
@@ -2030,7 +2179,7 @@ public sealed class LocalizationService : ILocalizationService
         ["Language"] = "语言",
         ["LanguageDescription"] = "选择 Monica 桌面端的显示语言。",
         ["Theme"] = "主题",
-        ["ThemeDescription"] = "跟随系统主题，或固定使用浅色/深色外观。",
+        ["ThemeDescription"] = "跟随系统主题，或固定使用浅色、深色、高对比度外观。",
         ["StartupView"] = "启动页",
         ["StartupViewDescription"] = "选择保险库解锁后首先显示的页面。",
         ["Security"] = "安全",
@@ -2205,6 +2354,7 @@ public sealed class LocalizationService : ILocalizationService
         ["SimplifiedChinese"] = "简体中文",
         ["Light"] = "浅色",
         ["Dark"] = "深色",
+        ["HighContrast"] = "高对比度",
         ["AskEveryTime"] = "每次询问",
         ["LocalWins"] = "本地优先",
         ["RemoteWins"] = "远端优先",
@@ -2328,7 +2478,9 @@ public sealed class LocalizationService : ILocalizationService
         ["UpdatedPasswordFormat"] = "已更新 {0}",
         ["CopiedPasswordFormat"] = "已复制 {0} 的密码",
         ["CopiedTotpFormat"] = "已复制 {0} 的动态口令",
+        ["CopiedWalletFieldFormat"] = "已复制{0}",
         ["MovedToRecycleBinFormat"] = "已将 {0} 移到回收站",
+        ["EmptiedRecycleBinFormat"] = "已永久删除回收站中的 {0} 个项目",
         ["GeneratedPassword"] = "已生成密码",
         ["ExportPrepared"] = "已准备 Monica JSON 导出预览",
         ["ImportJsonRequired"] = "请先粘贴 Monica JSON 再导入。",
@@ -2345,6 +2497,8 @@ public sealed class LocalizationService : ILocalizationService
         ["ExportedPasswordCsv"] = "已准备密码 CSV 导出预览",
         ["ExportedTotpCsv"] = "已准备 TOTP CSV 导出预览",
         ["ExportedNoteCsv"] = "已准备笔记 CSV 导出预览",
+        ["ExportedTimelineFormat"] = "已导出 {0} 条时间线记录",
+        ["TimelineExportEmpty"] = "没有可导出的时间线记录",
         ["ExportedAegisJson"] = "已准备 Aegis JSON 导出预览",
         ["SavedExportFileFormat"] = "已保存导出到 {0}。",
         ["SaveExportFileFailedFormat"] = "保存导出失败：{0}",

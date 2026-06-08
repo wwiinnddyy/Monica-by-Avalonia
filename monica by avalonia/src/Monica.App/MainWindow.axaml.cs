@@ -2,7 +2,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
 using Monica.App.ViewModels;
 using System.ComponentModel;
@@ -26,6 +28,10 @@ public partial class MainWindow : Window
     private MainWindowViewModel? _observedViewModel;
 
     private sealed record NoteEditorSnapshot(string Text, int SelectionStart, int SelectionEnd);
+    private sealed record SmokePageLayoutCheck(
+        string Section,
+        string[] RequiredClasses,
+        string[] RequiredVisibleClasses);
 
     private sealed class NoteEditorHistoryState
     {
@@ -75,6 +81,26 @@ public partial class MainWindow : Window
             HandleNoteWorkspaceShortcut(viewModel, e);
             if (e.Handled)
             {
+                return;
+            }
+        }
+
+        if (e.Key == Key.F5 && !IsTextEditingSource(e.Source))
+        {
+            if (viewModel.LoadCommand.CanExecute(null))
+            {
+                viewModel.LoadCommand.Execute(null);
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.N)
+        {
+            if (TryExecuteCurrentSectionNewCommand(viewModel))
+            {
+                e.Handled = true;
                 return;
             }
         }
@@ -139,6 +165,60 @@ public partial class MainWindow : Window
                 viewModel.DeletePasswordCommand.Execute(viewModel.SelectedPassword);
                 e.Handled = true;
             }
+        }
+    }
+
+    private static bool TryExecuteCurrentSectionNewCommand(MainWindowViewModel viewModel)
+    {
+        switch (viewModel.SelectedSection)
+        {
+            case "Passwords":
+                if (viewModel.AddPasswordCommand.CanExecute(null))
+                {
+                    viewModel.AddPasswordCommand.Execute(null);
+                    return true;
+                }
+
+                return false;
+
+            case "Totp":
+                if (viewModel.AddTotpCommand.CanExecute(null))
+                {
+                    viewModel.AddTotpCommand.Execute(null);
+                    return true;
+                }
+
+                return false;
+
+            case "Cards":
+                if (viewModel.AddWalletItemCommand.CanExecute(null))
+                {
+                    viewModel.AddWalletItemCommand.Execute(null);
+                    return true;
+                }
+
+                return false;
+
+            case "Generator":
+                if (viewModel.GeneratePasswordCommand.CanExecute(null))
+                {
+                    viewModel.GeneratePasswordCommand.Execute(null);
+                    return true;
+                }
+
+                return false;
+
+            case "Mdbx":
+                if (viewModel.CreateMdbxVaultCommand.CanExecute(null))
+                {
+                    viewModel.CreateMdbxVaultCommand.Execute(null);
+                    return true;
+                }
+
+                return false;
+
+            default:
+                return false;
         }
     }
 
@@ -381,6 +461,15 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.NoteWorkspaceViewportWidth = e.NewSize.Width;
+        }
+    }
+
+    private void WorkspaceHost_OnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.OtherWorkspaceViewportWidth = e.NewSize.Width;
+            viewModel.OtherWorkspaceViewportHeight = e.NewSize.Height;
         }
     }
 
@@ -1945,6 +2034,37 @@ public partial class MainWindow : Window
                 NoteFindPanel.IsVisible && NoteReplaceTextBox.IsVisible && NoteReplaceTextBox.IsFocused,
                 $"replaceVisible={NoteReplaceTextBox.IsVisible}");
             HideNoteFindPanel();
+
+            viewModel.SelectSectionCommand.Execute("Generator");
+            await Task.Delay(50);
+            viewModel.GeneratedPassword = "";
+            var generatorNewExecuted = TryExecuteCurrentSectionNewCommand(viewModel);
+            await Task.Delay(50);
+            Check(
+                "ctrl-n-generator-generates",
+                generatorNewExecuted && !string.IsNullOrWhiteSpace(viewModel.GeneratedPassword),
+                $"generatedLength={viewModel.GeneratedPassword?.Length ?? 0}");
+
+            viewModel.SelectSectionCommand.Execute("Totp");
+            await Task.Delay(50);
+            Check(
+                "ctrl-n-totp-action-available",
+                viewModel.AddTotpCommand.CanExecute(null),
+                $"section={viewModel.SelectedSection}");
+
+            viewModel.SelectSectionCommand.Execute("Cards");
+            await Task.Delay(50);
+            Check(
+                "ctrl-n-wallet-action-available",
+                viewModel.AddWalletItemCommand.CanExecute(null),
+                $"section={viewModel.SelectedSection}");
+
+            viewModel.SelectSectionCommand.Execute("Mdbx");
+            await Task.Delay(50);
+            Check(
+                "ctrl-n-mdbx-action-available",
+                viewModel.CreateMdbxVaultCommand.CanExecute(null),
+                $"section={viewModel.SelectedSection}");
         }
         catch (Exception ex)
         {
@@ -1959,8 +2079,222 @@ public partial class MainWindow : Window
         return success;
     }
 
+    public async Task<bool> RunSmokeUiOtherPagesChecksAsync()
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            return await Dispatcher.UIThread.InvokeAsync(RunSmokeUiOtherPagesChecksAsync);
+        }
+
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            AppDiagnostics.Info("Smoke UI other pages checks failed. reason=no-view-model");
+            return false;
+        }
+
+        var pages = new[]
+        {
+            new SmokePageLayoutCheck(
+                "Totp",
+                ["totpAccountList"],
+                ["totpCodeConsole", "totpInspector"]),
+            new SmokePageLayoutCheck(
+                "Cards",
+                ["walletItemList"],
+                ["walletWorkbench", "walletInspector"]),
+            new SmokePageLayoutCheck(
+                "Generator",
+                [],
+                ["generatorResultPanel", "generatorOptionsPanel"]),
+            new SmokePageLayoutCheck(
+                "Archive",
+                ["archiveRecoveryList"],
+                ["archiveFilterRail", "archiveRecoveryPanel"]),
+            new SmokePageLayoutCheck(
+                "RecycleBin",
+                ["recycleQueueList"],
+                ["recycleFilterRail", "recycleRiskPanel"]),
+            new SmokePageLayoutCheck(
+                "Timeline",
+                ["timelineEventStream"],
+                ["timelineFilterRail", "timelineInspector"]),
+            new SmokePageLayoutCheck(
+                "Mdbx",
+                ["mdbxWorkingCopyList", "mdbxPivotButton"],
+                ["mdbxSourceRail", "mdbxWorkbench"]),
+            new SmokePageLayoutCheck(
+                "DatabaseManagement",
+                ["databaseSourceList", "databasePivotButton"],
+                ["databaseSourceRail", "databaseWorkbench"])
+        };
+
+        var failures = new List<string>();
+        void Check(string name, bool condition, string detail = "")
+        {
+            if (condition)
+            {
+                AppDiagnostics.Info($"Smoke UI other page check passed. check={name}, {detail}");
+                return;
+            }
+
+            failures.Add(name);
+            AppDiagnostics.Info($"Smoke UI other page check failed. check={name}, {detail}");
+        }
+
+        try
+        {
+            var viewportReady = await WaitForSmokeWindowConditionAsync(
+                () => Bounds.Width >= MinWidth && Bounds.Height >= MinHeight,
+                TimeSpan.FromSeconds(3));
+            Check(
+                "viewport-ready",
+                viewportReady,
+                $"bounds={Bounds.Width:0}x{Bounds.Height:0}, min={MinWidth:0}x{MinHeight:0}");
+
+            foreach (var page in pages)
+            {
+                viewModel.SelectSectionCommand.Execute(page.Section);
+                await Task.Delay(80);
+                Check(
+                    $"{page.Section}-selected",
+                    string.Equals(viewModel.SelectedSection, page.Section, StringComparison.OrdinalIgnoreCase),
+                    $"selected={viewModel.SelectedSection}");
+
+                foreach (var className in page.RequiredClasses)
+                {
+                    Check(
+                        $"{page.Section}-class-{className}",
+                        HasControlClass(className),
+                        $"class={className}");
+                }
+
+                foreach (var className in page.RequiredVisibleClasses)
+                {
+                    Check(
+                        $"{page.Section}-visible-{className}",
+                        HasVisibleControlClass(className),
+                        $"class={className}");
+                }
+
+                Check(
+                    $"{page.Section}-no-visible-workspacePageHeader",
+                    !HasVisibleControlClass("workspacePageHeader"),
+                    "legacyHeader=workspacePageHeader");
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add("exception");
+            AppDiagnostics.Error("Smoke UI other pages checks failed", ex);
+        }
+
+        var success = failures.Count == 0;
+        AppDiagnostics.Info(
+            $"Smoke UI other pages checks completed. success={success}, " +
+            $"failureCount={failures.Count}, failures={string.Join(",", failures)}");
+        return success;
+    }
+
+    public async Task<bool> RunSmokeUiOtherPagesScreenshotsAsync(string screenshotDirectory)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            return await Dispatcher.UIThread.InvokeAsync(() => RunSmokeUiOtherPagesScreenshotsAsync(screenshotDirectory));
+        }
+
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            AppDiagnostics.Info("Smoke UI other pages screenshots failed. reason=no-view-model");
+            return false;
+        }
+
+        var failures = new List<string>();
+        var sections = new[]
+        {
+            "Totp",
+            "Cards",
+            "Generator",
+            "Archive",
+            "RecycleBin",
+            "Timeline",
+            "Mdbx",
+            "DatabaseManagement"
+        };
+
+        try
+        {
+            Directory.CreateDirectory(screenshotDirectory);
+            foreach (var section in sections)
+            {
+                viewModel.SelectSectionCommand.Execute(section);
+                await Task.Delay(150);
+
+                var fileName = $"{section}_{Math.Max(1, (int)Math.Round(Bounds.Width))}x{Math.Max(1, (int)Math.Round(Bounds.Height))}.png";
+                var path = Path.Combine(screenshotDirectory, fileName);
+                if (!await SaveSmokeScreenshotAsync(path))
+                {
+                    failures.Add(section);
+                    AppDiagnostics.Info($"Smoke UI screenshot failed. section={section}, path={path}");
+                    continue;
+                }
+
+                AppDiagnostics.Info($"Smoke UI screenshot saved. section={section}, path={path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add("exception");
+            AppDiagnostics.Error("Smoke UI other pages screenshots failed", ex);
+        }
+
+        var success = failures.Count == 0;
+        AppDiagnostics.Info(
+            $"Smoke UI other pages screenshots completed. success={success}, " +
+            $"failureCount={failures.Count}, failures={string.Join(",", failures)}, directory={screenshotDirectory}");
+        return success;
+    }
+
     private static string FormatSmokeLogValue(string? value) =>
         (value ?? "").Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
+
+    private async Task<bool> SaveSmokeScreenshotAsync(string path)
+    {
+        var width = Math.Max(1, (int)Math.Round(Bounds.Width));
+        var height = Math.Max(1, (int)Math.Round(Bounds.Height));
+        if (width < 1 || height < 1)
+        {
+            return false;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
+        var bitmap = new RenderTargetBitmap(new PixelSize(width, height), new Vector(96, 96));
+        bitmap.Render(this);
+        bitmap.Save(path);
+        return File.Exists(path) && new FileInfo(path).Length > 0;
+    }
+
+    private bool HasControlClass(string className) =>
+        this.GetVisualDescendants()
+            .OfType<Control>()
+            .Any(control => control.Classes.Contains(className));
+
+    private bool HasVisibleControlClass(string className) =>
+        this.GetVisualDescendants()
+            .OfType<Control>()
+            .Any(control => control.Classes.Contains(className) && IsControlEffectivelyVisible(control));
+
+    private static bool IsControlEffectivelyVisible(Control control)
+    {
+        for (var current = control as Visual; current is not null; current = current.GetVisualParent())
+        {
+            if (current is Control currentControl && !currentControl.IsVisible)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static async Task<bool> WaitForSmokeWindowConditionAsync(Func<bool> condition, TimeSpan timeout)
     {

@@ -24,6 +24,8 @@ public partial class App : Application
     private ServiceProvider? _services;
     private MainWindow? _mainWindow;
 
+    internal readonly record struct SmokeUiViewportSize(double Width, double Height);
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -46,12 +48,16 @@ public partial class App : Application
             var smokeNoteMode = GetSmokeUiNoteMode(desktop.Args);
             var smokeNoteLongLineCount = GetSmokeUiNoteLongLineCount(desktop.Args);
             var smokeTheme = GetSmokeUiTheme(desktop.Args);
+            var smokeViewportSize = GetSmokeUiViewportSize(desktop.Args);
+            var smokeScreenshotDirectory = GetSmokeUiArgument(desktop.Args, "--smoke-ui-screenshot-dir");
             var smokeVaultLoadDelayMilliseconds = GetSmokeUiCount(desktop.Args, "--smoke-ui-load-delay-ms");
             var smokeMaxVaultLoadMilliseconds = GetSmokeUiCount(desktop.Args, "--smoke-ui-max-vault-load-ms");
             var smokeH04ListInteractions = HasSmokeUiFlag(desktop.Args, "--smoke-ui-h04-lists");
             var smokeNoteEditorChecks = HasSmokeUiFlag(desktop.Args, "--smoke-ui-note-editor-checks");
+            var smokeOtherPagesChecks = HasSmokeUiFlag(desktop.Args, "--smoke-ui-other-pages-checks");
             var smokeKeyboardChecks = HasSmokeUiFlag(desktop.Args, "--smoke-ui-keyboard-checks");
             var smokeExitAfterChecks = HasSmokeUiFlag(desktop.Args, "--smoke-ui-exit-after-checks");
+            ApplySmokeUiViewportSize(_mainWindow, smokeViewportSize);
             if (!string.IsNullOrWhiteSpace(smokePassword))
             {
                 QueueSmokeUiUnlock(
@@ -65,10 +71,12 @@ public partial class App : Application
                     smokeNoteMode,
                     smokeNoteLongLineCount,
                     smokeTheme,
+                    smokeScreenshotDirectory,
                     smokeVaultLoadDelayMilliseconds,
                     smokeMaxVaultLoadMilliseconds,
                     smokeH04ListInteractions,
                     smokeNoteEditorChecks,
+                    smokeOtherPagesChecks,
                     smokeKeyboardChecks,
                     smokeExitAfterChecks);
             }
@@ -90,10 +98,30 @@ public partial class App : Application
             return Environment.GetEnvironmentVariable(DefaultSmokeUiUnlockPasswordEnvironmentVariable);
         }
 
-        return GetSmokeUiArgument(args, "--smoke-ui-unlock");
+        return GetSmokeUiArgument(args, "--smoke-ui-unlock", allowOptionLikeValue: true);
     }
 
-    private static string? GetSmokeUiArgument(string[]? args, string optionName)
+    internal static SmokeUiViewportSize? GetSmokeUiViewportSize(string[]? args)
+    {
+        var width = GetSmokeUiCount(args, "--smoke-ui-width");
+        var height = GetSmokeUiCount(args, "--smoke-ui-height");
+        if (width <= 0 && height <= 0)
+        {
+            return null;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        return new SmokeUiViewportSize(width, height);
+    }
+
+    private static string? GetSmokeUiArgument(
+        string[]? args,
+        string optionName,
+        bool allowOptionLikeValue = false)
     {
         if (args is null)
         {
@@ -104,30 +132,24 @@ public partial class App : Application
         {
             if (string.Equals(args[index], optionName, StringComparison.Ordinal))
             {
-                return args[index + 1];
+                var value = args[index + 1];
+                if (!allowOptionLikeValue && IsSmokeUiOptionToken(value))
+                {
+                    return null;
+                }
+
+                return value;
             }
         }
 
         return null;
     }
 
-    private static string? GetSmokeUiSection(string[]? args)
-    {
-        if (args is null)
-        {
-            return null;
-        }
+    private static bool IsSmokeUiOptionToken(string value) =>
+        value.StartsWith("--", StringComparison.Ordinal);
 
-        for (var index = 0; index < args.Length - 1; index++)
-        {
-            if (string.Equals(args[index], "--smoke-ui-section", StringComparison.Ordinal))
-            {
-                return args[index + 1];
-            }
-        }
-
-        return null;
-    }
+    private static string? GetSmokeUiSection(string[]? args) =>
+        GetSmokeUiArgument(args, "--smoke-ui-section");
 
     private static int GetSmokeUiSelectPasswordCount(string[]? args)
     {
@@ -149,41 +171,11 @@ public partial class App : Application
         return GetSmokeUiCount(args, "--smoke-ui-note-long-lines");
     }
 
-    private static string? GetSmokeUiNoteMode(string[]? args)
-    {
-        if (args is null)
-        {
-            return null;
-        }
+    private static string? GetSmokeUiNoteMode(string[]? args) =>
+        GetSmokeUiArgument(args, "--smoke-ui-note-mode");
 
-        for (var index = 0; index < args.Length - 1; index++)
-        {
-            if (string.Equals(args[index], "--smoke-ui-note-mode", StringComparison.Ordinal))
-            {
-                return args[index + 1];
-            }
-        }
-
-        return null;
-    }
-
-    private static string? GetSmokeUiTheme(string[]? args)
-    {
-        if (args is null)
-        {
-            return null;
-        }
-
-        for (var index = 0; index < args.Length - 1; index++)
-        {
-            if (string.Equals(args[index], "--smoke-ui-theme", StringComparison.Ordinal))
-            {
-                return args[index + 1];
-            }
-        }
-
-        return null;
-    }
+    private static string? GetSmokeUiTheme(string[]? args) =>
+        GetSmokeUiArgument(args, "--smoke-ui-theme");
 
     private static int GetSmokeUiCount(string[]? args, string optionName)
     {
@@ -215,10 +207,12 @@ public partial class App : Application
         string? smokeNoteMode,
         int smokeNoteLongLineCount,
         string? smokeTheme,
+        string? smokeScreenshotDirectory,
         int smokeVaultLoadDelayMilliseconds,
         int smokeMaxVaultLoadMilliseconds,
         bool smokeH04ListInteractions,
         bool smokeNoteEditorChecks,
+        bool smokeOtherPagesChecks,
         bool smokeKeyboardChecks,
         bool smokeExitAfterChecks)
     {
@@ -290,12 +284,28 @@ public partial class App : Application
                 smokeSuccess &= await RunSmokeUiH04ListInteractionsAsync(viewModel);
             }
 
+            if (smokeOtherPagesChecks)
+            {
+                var success = await mainWindow.RunSmokeUiOtherPagesChecksAsync();
+                smokeSuccess &= success;
+                AppDiagnostics.Info(
+                    $"Smoke UI other pages checks result. success={success}, status={viewModel.StatusMessage}");
+            }
+
             if (smokeKeyboardChecks)
             {
                 var success = await mainWindow.RunSmokeUiKeyboardChecksAsync();
                 smokeSuccess &= success;
                 AppDiagnostics.Info(
                     $"Smoke UI keyboard checks result. success={success}, status={viewModel.StatusMessage}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(smokeScreenshotDirectory))
+            {
+                var success = await mainWindow.RunSmokeUiOtherPagesScreenshotsAsync(smokeScreenshotDirectory);
+                smokeSuccess &= success;
+                AppDiagnostics.Info(
+                    $"Smoke UI other pages screenshots result. success={success}, directory={smokeScreenshotDirectory}");
             }
 
             AppDiagnostics.Info(
@@ -309,6 +319,19 @@ public partial class App : Application
         }, DispatcherPriority.Background);
     }
 
+    private static void ApplySmokeUiViewportSize(MainWindow mainWindow, SmokeUiViewportSize? smokeViewportSize)
+    {
+        if (smokeViewportSize is not { } viewportSize)
+        {
+            return;
+        }
+
+        mainWindow.Width = Math.Max(mainWindow.MinWidth, viewportSize.Width);
+        mainWindow.Height = Math.Max(mainWindow.MinHeight, viewportSize.Height);
+        AppDiagnostics.Info(
+            $"Smoke UI viewport applied. width={mainWindow.Width}, height={mainWindow.Height}");
+    }
+
     private static void ApplySmokeUiTheme(MainWindowViewModel viewModel, string? smokeTheme)
     {
         if (string.IsNullOrWhiteSpace(smokeTheme))
@@ -320,6 +343,9 @@ public partial class App : Application
         {
             "light" => "light",
             "dark" => "dark",
+            "highcontrast" => "high-contrast",
+            "high-contrast" => "high-contrast",
+            "contrast" => "high-contrast",
             "default" => "system",
             "system" => "system",
             _ => ""

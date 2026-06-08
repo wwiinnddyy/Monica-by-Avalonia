@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,6 +16,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using FluentAvalonia.Styling;
 using Monica.App;
 using Monica.App.Services;
 using Monica.Core.ImportExport;
@@ -32,6 +34,7 @@ public sealed record NoteOutlineItem(int Level, string Title, int LineNumber, Th
 public sealed record NoteReferenceItem(string Label, string Target, int LineNumber, bool IsImage);
 public sealed record NoteImagePreviewItem(string StoragePath, string DisplayName, string SizeText, Bitmap Image);
 public sealed record NoteTreeGroup(string Name, int Count, IReadOnlyList<SecureItem> Items, bool IsUntagged);
+public sealed record GeneratorHistoryItem(string Value, string ModeLabel, string StrengthText, string CreatedAtText);
 public sealed partial class NoteEditorTab : ObservableObject
 {
     public NoteEditorTab(long id, SecureItem? source, string title)
@@ -169,6 +172,10 @@ public sealed record PasswordFolderFilterChoice(
     public Thickness Indent => new(Math.Max(0, Level) * 14, 0, 0, 0);
     public bool IsCollapsed => HasChildren && !IsExpanded;
 }
+public sealed record TotpFilterChoice(string Key, string Label, int Count, int Level, bool IsSelected)
+{
+    public Thickness Indent => new(Math.Max(0, Level) * 12, 0, 0, 0);
+}
 public sealed record VaultSourceDisplayItem(string DisplayName, string Kind, string LocalPath, string RemoteUrl, string SyncStatus);
 public sealed record SyncHealthDisplayItem(string Label, string Value, string Detail);
 internal sealed record VaultLoadSnapshot(
@@ -242,6 +249,16 @@ internal sealed class DisabledConfirmationDialogService : IConfirmationDialogSer
         string? closeButtonText = null,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(true);
+
+    public Task<bool> ConfirmTypedAsync(
+        string title,
+        string message,
+        string requiredPhrase,
+        string instruction,
+        string primaryButtonText,
+        string? closeButtonText = null,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(true);
 }
 
 public sealed partial class MainWindowViewModel : ObservableObject
@@ -250,8 +267,31 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private const int PasswordHistoryLimit = 10;
     private const int PasswordQuickAccessLimit = 6;
+    private const int MaxGeneratorHistoryItems = 8;
+    private const string GeneratorModeRandom = "random";
+    private const string GeneratorModePassphrase = "passphrase";
+    private const string GeneratorModePin = "pin";
+    private const string GeneratorModeUsername = "username";
+    private const string GeneratorTemplateBalanced = "balanced";
+    private const string GeneratorTemplateMaximum = "maximum";
+    private const string GeneratorTemplateMemorable = "memorable";
+    private const string GeneratorTemplatePin = "pin";
+    private const string GeneratorTemplateUsername = "username";
+    private const string SimilarGeneratorCharacters = "0OolI1|`";
+    private const string TotpFilterAll = "all";
+    private const string TotpFilterFavorites = "favorites";
+    private const string TotpFilterExpiringSoon = "expiring-soon";
+    private const string TotpFilterUnbound = "unbound";
+    private const string TotpFilterIssuerPrefix = "issuer:";
     private static readonly TimeSpan SelectedPasswordDetailsCoalesceDelay = TimeSpan.FromMilliseconds(60);
     private static readonly TimeSpan SelectedPasswordDetailsLoadingDelay = TimeSpan.FromMilliseconds(120);
+    private static readonly string[] GeneratorPassphraseWords =
+    [
+        "amber", "atlas", "brisk", "cedar", "cinder", "cobalt", "coral", "delta",
+        "ember", "falcon", "frost", "harbor", "ivory", "juniper", "kinetic", "linen",
+        "meadow", "meteor", "nebula", "onyx", "orchid", "pixel", "quartz", "ripple",
+        "saffron", "signal", "silver", "summit", "tundra", "velvet", "violet", "willow"
+    ];
     private static readonly PlatformFilePickerFileType[] MonicaJsonFileTypes =
     [
         new("Monica JSON", ["*.json"])
@@ -388,6 +428,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private int _noteImagePreviewVersion;
     private LegacyVaultDetection _legacyVaultDetection = LegacyVaultDetection.Empty;
     private readonly HashSet<string> _collapsedPasswordFolderKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _settingsSaveSync = new();
+    private bool _isSavingSettings;
+    private bool _hasPendingSettingsSave;
 
     public MainWindowViewModel(
         IMonicaRepository repository,
@@ -461,6 +504,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<NoteEditorTab> OpenNoteTabs { get; } = [];
     public ObservableCollection<NoteImagePreviewItem> NoteImagePreviewItems { get; } = [];
     public ObservableCollection<SecureItem> TotpItems { get; } = new ObservableRangeCollection<SecureItem>();
+    public ObservableCollection<TotpFilterChoice> TotpFilterChoices { get; } = [];
     public ObservableCollection<SecureItem> WalletItems { get; } = new ObservableRangeCollection<SecureItem>();
     public ObservableCollection<Category> Categories { get; } = new ObservableRangeCollection<Category>();
     public ObservableCollection<LocalizedPlatformIntegrationCapability> PlatformIntegrationCapabilities { get; } = [];
@@ -482,6 +526,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public ObservableCollection<SettingsChoice> ConflictStrategyOptions { get; } = [];
     public ObservableCollection<SettingsChoice> PasswordSortOptions { get; } = [];
     public ObservableCollection<SettingsChoice> SecurityQuestionOptions { get; } = [];
+    public ObservableCollection<SettingsChoice> GeneratorModeOptions { get; } = [];
+    public ObservableCollection<SettingsChoice> GeneratorTemplateOptions { get; } = [];
+    public ObservableCollection<GeneratorHistoryItem> GeneratedPasswordHistory { get; } = [];
     public ObservableCollection<PasswordFolderFilterChoice> PasswordFolderFilters { get; } = [];
     public IEnumerable<PasswordFolderFilterChoice> SystemPasswordFolderFilters =>
         PasswordFolderFilters.Where(item => item.IsSystemNode);
@@ -490,6 +537,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool HasRegularPasswordFolderFilters => PasswordFolderFilters.Any(item => !item.IsSystemNode);
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRecoverableStatusMessage))]
     private bool _isUnlocked;
 
     [ObservableProperty]
@@ -586,6 +634,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _passwordSearchQuery = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRecoverableStatusMessage))]
     private string _statusMessage = "Locked";
 
     [ObservableProperty]
@@ -605,6 +654,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _generatorIncludeSymbols = true;
+
+    [ObservableProperty]
+    private bool _generatorExcludeSimilarCharacters;
+
+    [ObservableProperty]
+    private string _generatorMode = GeneratorModeRandom;
+
+    [ObservableProperty]
+    private string _generatorTemplate = GeneratorTemplateBalanced;
+
+    [ObservableProperty]
+    private int _generatorWordCount = 4;
 
     [ObservableProperty]
     private string _exportPreview = "";
@@ -637,6 +698,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _exportAegisPreview = "";
 
     [ObservableProperty]
+    private string _exportTimelinePreview = "";
+
+    [ObservableProperty]
     private string _importCsvText = "";
 
     [ObservableProperty]
@@ -667,6 +731,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _isCheckingCompromisedPasswords;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasRecoverableStatusMessage))]
     private bool _isLoadingVault;
 
     [ObservableProperty]
@@ -754,6 +819,36 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public GridLength NoteInspectorColumnWidth => IsNoteInspectorPaneVisible
         ? new GridLength(260)
         : new GridLength(0);
+    public bool IsOtherWorkspaceCompact =>
+        OtherWorkspaceViewportWidth > 0 &&
+        (OtherWorkspaceViewportWidth < 980 || OtherWorkspaceViewportHeight < 460);
+    public GridLength TotpAccountColumnWidth => IsOtherWorkspaceCompact
+        ? new GridLength(1.15, GridUnitType.Star)
+        : new GridLength(300);
+    public GridLength TotpCodeColumnWidth => IsOtherWorkspaceCompact
+        ? new GridLength(1, GridUnitType.Star)
+        : new GridLength(1, GridUnitType.Star);
+    public GridLength TotpInspectorColumnWidth => IsOtherWorkspaceCompact
+        ? new GridLength(1.05, GridUnitType.Star)
+        : new GridLength(300);
+    public Thickness TotpCodeConsolePadding => IsOtherWorkspaceCompact
+        ? new Thickness(16)
+        : new Thickness(24);
+    public double TotpCodeFontSize => IsOtherWorkspaceCompact ? 40 : 56;
+    public GridLength GeneratorOptionsColumnWidth => IsOtherWorkspaceCompact
+        ? new GridLength(300)
+        : new GridLength(340);
+    public Thickness GeneratorResultPanelPadding => IsOtherWorkspaceCompact
+        ? new Thickness(18)
+        : new Thickness(24);
+    public Thickness GeneratorOptionsPanelPadding => IsOtherWorkspaceCompact
+        ? new Thickness(14)
+        : new Thickness(18);
+    public double GeneratorOptionsSpacing => IsOtherWorkspaceCompact ? 12 : 18;
+    public double GeneratorCheckboxSpacing => IsOtherWorkspaceCompact ? 6 : 10;
+    public double GeneratorPasswordBoxMinHeight => IsOtherWorkspaceCompact ? 96 : 170;
+    public double GeneratorHistoryPanelMaxHeight => IsOtherWorkspaceCompact ? 78 : 104;
+    public bool ShowGeneratorStrengthSummaryCard => !IsOtherWorkspaceCompact;
     public string NoteEditorStatusText =>
         NoteSelectedCharacterCount > 0
             ? $"行 {NoteCaretLine}, 列 {NoteCaretColumn} · 已选 {NoteSelectedCharacterCount} · {NoteLineCount} 行 · {NoteWordCount} 词 · {NoteCharacterCount} 字符"
@@ -782,6 +877,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private double _noteWorkspaceViewportWidth;
 
+    private double _otherWorkspaceViewportWidth;
+
+    private double _otherWorkspaceViewportHeight;
+
     public double NoteTabRailViewportWidth
     {
         get => _noteTabRailViewportWidth;
@@ -802,6 +901,30 @@ public sealed partial class MainWindowViewModel : ObservableObject
             if (SetProperty(ref _noteWorkspaceViewportWidth, Math.Max(0, value)))
             {
                 RaiseNoteWorkspaceLayoutState();
+            }
+        }
+    }
+
+    public double OtherWorkspaceViewportWidth
+    {
+        get => _otherWorkspaceViewportWidth;
+        set
+        {
+            if (SetProperty(ref _otherWorkspaceViewportWidth, Math.Max(0, value)))
+            {
+                RaiseOtherWorkspaceLayoutState();
+            }
+        }
+    }
+
+    public double OtherWorkspaceViewportHeight
+    {
+        get => _otherWorkspaceViewportHeight;
+        set
+        {
+            if (SetProperty(ref _otherWorkspaceViewportHeight, Math.Max(0, value)))
+            {
+                RaiseOtherWorkspaceLayoutState();
             }
         }
     }
@@ -850,6 +973,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private TotpItemDetailsViewModel? _selectedTotpDetails;
+
+    [ObservableProperty]
+    private string _selectedTotpFilterKey = TotpFilterAll;
 
     [ObservableProperty]
     private SecureItem? _selectedWalletItem;
@@ -1131,6 +1257,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public string PasswordCountText => _localization.Format("PasswordCountFormat", Passwords.Count);
     public string ArchivedPasswordCountText => _localization.Format("ArchivedPasswordCountFormat", ArchivedPasswords.Count);
     public string DeletedPasswordCountText => _localization.Format("DeletedPasswordCountFormat", DeletedPasswords.Count);
+    public bool HasDeletedPasswords => DeletedPasswords.Count > 0;
     public string SelectedPasswordCountText => _localization.Format("SelectedPasswordCountFormat", SelectedPasswordCount);
     public string SelectedPasswordTitle => SelectedPassword?.Title ?? _localization.Get("PasswordDetails");
     public string SelectedPasswordSubtitle => SelectedPassword is null
@@ -1243,6 +1370,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool ShowPasswordListDetails => !CompactPasswordList;
     public string NoteCountText => _localization.Format("NoteCountFormat", NoteItems.Count);
     public string TotpCountText => _localization.Format("TotpCountFormat", TotpItems.Count);
+    public int TotpExpiringSoonCount => TotpItems.Count(IsTotpExpiringSoon);
+    public string TotpConsoleStatusText => _localization.Format("TotpConsoleStatusFormat", TotpItems.Count, TotpExpiringSoonCount);
+    public string TotpFilteredStatusText => _localization.Format("TotpFilteredStatusFormat", FilteredTotpItems.Count, TotpItems.Count);
+    public string TotpScanQrText => _localization.Get("TotpScanQr");
+    public string TotpManualAddText => _localization.Get("TotpManualAdd");
+    public string TotpMoreActionsText => _localization.Get("MoreActions");
+    public string TotpFilterTitleText => _localization.Get("TotpFilterTitle");
+    public string TotpIssuerGroupsText => _localization.Get("TotpIssuerGroups");
+    public string TotpNoFilteredResultsText => _localization.Get("TotpNoFilteredResults");
+    public string TotpEmptyStateText => HasTotpFilterOrSearch && HasTotpItems
+        ? _localization.Get("TotpNoFilteredResults")
+        : _localization.Get("TotpEmptyHint");
+    public string ClearTotpFiltersText => _localization.Get("ClearTotpFilters");
+    public string TotpShowHiddenText => _localization.Get("ShowHidden");
+    public string TotpHelpText => _localization.Get("Help");
     public string WalletCountText => _localization.Format("WalletCountFormat", WalletItems.Count);
     public string TimelineCountText => _localization.Format("TimelineCountFormat", TimelineEntries.Count);
     public string SecurityIssueCountText => _localization.Format("SecurityIssueCountFormat", SecurityIssueItems.Count);
@@ -1373,6 +1515,55 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ? _localization.Format("LegacyVaultImportPromptFormat", _legacyVaultDetection.DatabasePath)
         : "";
     public string GeneratorLengthText => _localization.Format("GeneratorLengthFormat", GeneratorLength);
+    public string GeneratorWordCountText => _localization.Format("GeneratorWordCountFormat", GeneratorWordCount);
+    public int GeneratorLengthMinimum => GeneratorMode == GeneratorModePin ? 4 : 8;
+    public int GeneratorLengthMaximum => GeneratorMode == GeneratorModePin ? 32 : 128;
+    public bool IsGeneratorPassphraseMode => GeneratorMode == GeneratorModePassphrase;
+    public bool ShowGeneratorCharacterOptions => GeneratorMode is GeneratorModeRandom or GeneratorModeUsername;
+    public bool ShowGeneratorLengthOptions => GeneratorMode is not GeneratorModePassphrase;
+    public bool ShowGeneratorWordCountOptions => GeneratorMode == GeneratorModePassphrase;
+    public bool HasGeneratedPasswordHistory => GeneratedPasswordHistory.Count > 0;
+    public string SelectedGeneratorModeLabel => FindChoiceLabel(GeneratorModeOptions, GeneratorMode);
+    public string SelectedGeneratorTemplateLabel => FindChoiceLabel(GeneratorTemplateOptions, GeneratorTemplate);
+    public SettingsChoice? SelectedGeneratorModeOption
+    {
+        get => GeneratorModeOptions.FirstOrDefault(item => Equals(item.Value, GeneratorMode));
+        set
+        {
+            if (value?.Value is string mode)
+            {
+                GeneratorMode = mode;
+            }
+        }
+    }
+
+    public SettingsChoice? SelectedGeneratorTemplateOption
+    {
+        get => GeneratorTemplateOptions.FirstOrDefault(item => Equals(item.Value, GeneratorTemplate));
+        set
+        {
+            if (value?.Value is string template)
+            {
+                GeneratorTemplate = template;
+            }
+        }
+    }
+
+    public string GeneratorStrategySummaryText => GeneratorMode switch
+    {
+        GeneratorModePassphrase => _localization.Format(
+            "GeneratorStrategyPassphraseFormat",
+            SelectedGeneratorTemplateLabel,
+            GeneratorWordCount),
+        GeneratorModePin => _localization.Format(
+            "GeneratorStrategyLengthFormat",
+            SelectedGeneratorTemplateLabel,
+            GeneratorLength),
+        _ => _localization.Format(
+            "GeneratorStrategyLengthFormat",
+            SelectedGeneratorTemplateLabel,
+            GeneratorLength)
+    };
     public string GeneratedPasswordStrengthText
     {
         get
@@ -1419,7 +1610,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool HasSelectedSecurityIssue => SelectedSecurityIssue is not null;
     public bool HasSelectedMdbxDatabaseItem => SelectedMdbxDatabaseItem is not null;
     public bool HasSelectedVaultSource => SelectedVaultSource is not null;
+    public bool HasVaultSources => VaultSources.Count > 0;
     public bool HasWalletItems => WalletItems.Count > 0;
+    public bool HasRecoverableStatusMessage =>
+        IsUnlocked &&
+        !IsLoadingVault &&
+        IsRecoverableStatusMessage(StatusMessage);
     public bool AreAllFilteredPasswordsSelected
     {
         get
@@ -1448,12 +1644,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool HasPasswordQuickAccessItems => RecentPasswordQuickAccessItems.Any() || FrequentPasswordQuickAccessItems.Any();
 
     public IReadOnlyList<PasswordEntry> FilteredPasswords => GetFilteredPasswords();
+    public IReadOnlyList<SecureItem> FilteredTotpItems => TotpItems.Where(MatchesTotpFilters).ToArray();
     public IEnumerable<PasswordEntry> FilteredArchivedPasswords =>
         ArchivedPasswords.Where(item => MatchesPasswordSearch(item, SearchText));
     public IEnumerable<PasswordEntry> FilteredDeletedPasswords =>
         DeletedPasswords.Where(item => MatchesPasswordSearch(item, SearchText));
     public bool HasFilteredArchivedPasswords => FilteredArchivedPasswords.Any();
     public bool HasFilteredDeletedPasswords => FilteredDeletedPasswords.Any();
+    public bool HasFilteredTotpItems => FilteredTotpItems.Count > 0;
+    public bool HasTotpFilterOrSearch =>
+        !string.Equals(SelectedTotpFilterKey, TotpFilterAll, StringComparison.OrdinalIgnoreCase) ||
+        !string.IsNullOrWhiteSpace(SearchText);
     public bool HasTimelineEntries => TimelineEntries.Count > 0;
     public bool HasSecurityIssues => SecurityIssueItems.Count > 0;
 
@@ -1472,6 +1673,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             FilteredDeletedPasswords.FirstOrDefault();
         RaisePasswordSelectionState();
         ReconcileSelectedPasswordDetails();
+        RaiseTotpFilterState();
     }
 
     partial void OnPasswordSearchTextChanged(string value)
@@ -1526,12 +1728,80 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     partial void OnStatusMessageChanged(string value) => RaiseShellStatus();
 
+    private static bool IsRecoverableStatusMessage(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("failure", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("unavailable", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("无法", StringComparison.Ordinal) ||
+            value.Contains("失败", StringComparison.Ordinal) ||
+            value.Contains("错误", StringComparison.Ordinal);
+    }
+
     partial void OnGeneratedPasswordChanged(string value) => OnPropertyChanged(nameof(GeneratedPasswordStrengthText));
 
     partial void OnGeneratorLengthChanged(int value)
     {
-        GeneratorLength = Math.Clamp(value, 8, 128);
+        GeneratorLength = Math.Clamp(value, GeneratorLengthMinimum, GeneratorLengthMaximum);
+        RaiseGeneratorState();
+    }
+
+    partial void OnGeneratorWordCountChanged(int value)
+    {
+        GeneratorWordCount = Math.Clamp(value, 2, 8);
+        RaiseGeneratorState();
+    }
+
+    partial void OnGeneratorModeChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            GeneratorMode = GeneratorModeRandom;
+            return;
+        }
+
+        GeneratorLength = Math.Clamp(GeneratorLength, GeneratorLengthMinimum, GeneratorLengthMaximum);
+        RaiseGeneratorState();
+    }
+
+    partial void OnGeneratorTemplateChanged(string value)
+    {
+        ApplyGeneratorTemplate(value);
+        RaiseGeneratorState();
+    }
+
+    partial void OnGeneratorIncludeUppercaseChanged(bool value) => RaiseGeneratorState();
+
+    partial void OnGeneratorIncludeLowercaseChanged(bool value) => RaiseGeneratorState();
+
+    partial void OnGeneratorIncludeNumbersChanged(bool value) => RaiseGeneratorState();
+
+    partial void OnGeneratorIncludeSymbolsChanged(bool value) => RaiseGeneratorState();
+
+    partial void OnGeneratorExcludeSimilarCharactersChanged(bool value) => RaiseGeneratorState();
+
+    private void RaiseGeneratorState()
+    {
         OnPropertyChanged(nameof(GeneratorLengthText));
+        OnPropertyChanged(nameof(GeneratorWordCountText));
+        OnPropertyChanged(nameof(GeneratorLengthMinimum));
+        OnPropertyChanged(nameof(GeneratorLengthMaximum));
+        OnPropertyChanged(nameof(IsGeneratorPassphraseMode));
+        OnPropertyChanged(nameof(ShowGeneratorCharacterOptions));
+        OnPropertyChanged(nameof(ShowGeneratorLengthOptions));
+        OnPropertyChanged(nameof(ShowGeneratorWordCountOptions));
+        OnPropertyChanged(nameof(SelectedGeneratorModeLabel));
+        OnPropertyChanged(nameof(SelectedGeneratorTemplateLabel));
+        OnPropertyChanged(nameof(SelectedGeneratorModeOption));
+        OnPropertyChanged(nameof(SelectedGeneratorTemplateOption));
+        OnPropertyChanged(nameof(GeneratorStrategySummaryText));
+        OnPropertyChanged(nameof(GeneratedPasswordStrengthText));
     }
 
     partial void OnNoteContentChanged(string value)
@@ -1633,6 +1903,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SelectedTotpDetails = value is null ? null : new TotpItemDetailsViewModel(_localization, value);
         OnPropertyChanged(nameof(HasSelectedTotpItem));
     }
+
+    partial void OnSelectedTotpFilterKeyChanged(string value) => RaiseTotpFilterState();
 
     partial void OnSelectedWalletItemChanged(SecureItem? value)
     {
@@ -3401,16 +3673,35 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _localization.Cancel);
 
     private Task<bool> ConfirmPermanentDeleteAsync(string itemTitle) =>
-        _confirmationDialogService.ConfirmAsync(
+        _confirmationDialogService.ConfirmTypedAsync(
             _localization.Get("DeletePermanentlyConfirmationTitle"),
             _localization.Format("DeletePermanentlyConfirmationMessageFormat", itemTitle),
+            _localization.Get("PermanentDeleteConfirmationPhrase"),
+            _localization.Format(
+                "PermanentDeleteConfirmationInstructionFormat",
+                _localization.Get("PermanentDeleteConfirmationPhrase")),
             _localization.Get("DeletePermanently"),
             _localization.Cancel);
 
+    private Task<bool> ConfirmEmptyRecycleBinAsync(int count) =>
+        _confirmationDialogService.ConfirmTypedAsync(
+            _localization.Get("EmptyRecycleBinConfirmationTitle"),
+            _localization.Format("EmptyRecycleBinConfirmationMessageFormat", count),
+            _localization.Get("EmptyRecycleBinConfirmationPhrase"),
+            _localization.Format(
+                "EmptyRecycleBinConfirmationInstructionFormat",
+                _localization.Get("EmptyRecycleBinConfirmationPhrase")),
+            _localization.Get("EmptyRecycleBin"),
+            _localization.Cancel);
+
     private Task<bool> ConfirmDeleteWebDavBackupAsync(string fileName) =>
-        _confirmationDialogService.ConfirmAsync(
+        _confirmationDialogService.ConfirmTypedAsync(
             _localization.Get("DeleteWebDavBackupConfirmationTitle"),
             _localization.Format("DeleteWebDavBackupConfirmationMessageFormat", fileName),
+            _localization.Get("DeleteWebDavBackupConfirmationPhrase"),
+            _localization.Format(
+                "DeleteWebDavBackupConfirmationInstructionFormat",
+                _localization.Get("DeleteWebDavBackupConfirmationPhrase")),
             _localization.Get("Delete"),
             _localization.Cancel);
 
@@ -3670,6 +3961,41 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task EmptyRecycleBinAsync()
+    {
+        var items = DeletedPasswords.ToArray();
+        if (items.Length == 0)
+        {
+            return;
+        }
+
+        if (!await ConfirmEmptyRecycleBinAsync(items.Length))
+        {
+            return;
+        }
+
+        foreach (var item in items)
+        {
+            await _repository.DeletePasswordPermanentlyAsync(item.Id);
+            await _repository.LogAsync(new OperationLog
+            {
+                ItemType = "PASSWORD",
+                ItemId = item.Id,
+                ItemTitle = item.Title,
+                OperationType = "PURGE",
+                DeviceName = Environment.MachineName
+            });
+        }
+
+        DeletedPasswords.Clear();
+        await LoadTotpItemsAsync();
+        await LoadTimelineAsync();
+        RaiseCounts();
+        RefreshSecurityAnalysis();
+        StatusMessage = _localization.Format("EmptiedRecycleBinFormat", items.Length);
+    }
+
+    [RelayCommand]
     private void ShowArchivedPasswordDetails(PasswordEntry? entry)
     {
         if (entry is not null)
@@ -3712,6 +4038,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             SelectedTotpItem = item;
         }
+    }
+
+    [RelayCommand]
+    private void SelectTotpFilter(string? key)
+    {
+        SelectedTotpFilterKey = string.IsNullOrWhiteSpace(key) ? TotpFilterAll : key;
+    }
+
+    [RelayCommand]
+    private void ClearTotpFilters()
+    {
+        SearchText = "";
+        SelectedTotpFilterKey = TotpFilterAll;
+        RaiseTotpFilterState();
+        StatusMessage = _localization.Get("ClearedTotpFilters");
     }
 
     [RelayCommand]
@@ -3765,9 +4106,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
         TotpItems.Insert(0, item);
         SelectedTotpItem = item;
         RaiseCounts();
+        RaiseTotpFilterState(reconcileSelection: false);
         RaiseTotpSelectionState();
         await LoadTimelineAsync();
         StatusMessage = _localization.Format("SavedTotpFormat", item.Title);
+    }
+
+    [RelayCommand]
+    private async Task ScanTotpQrAsync()
+    {
+        StatusMessage = _localization.Get("TotpScanQrFallback");
+        await AddTotpAsync();
     }
 
     [RelayCommand]
@@ -3853,6 +4202,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedTotpDetails = new TotpItemDetailsViewModel(_localization, item);
         }
 
+        RaiseTotpFilterState();
         await LoadTimelineAsync();
         StatusMessage = _localization.Format(next ? "FavoritedTotpFormat" : "UnfavoritedTotpFormat", item.Title);
     }
@@ -3923,6 +4273,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedTotpDetails = new TotpItemDetailsViewModel(_localization, SelectedTotpItem);
         }
 
+        RaiseTotpFilterState();
         RaiseTotpSelectionState();
         await LoadTimelineAsync();
         StatusMessage = _localization.Format("FavoritedTotpCountFormat", selected.Length);
@@ -4018,6 +4369,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             SelectedWalletItem = item;
         }
+    }
+
+    [RelayCommand]
+    private async Task CopyWalletFieldAsync(WalletFieldDisplayItem? field)
+    {
+        if (field is null || string.IsNullOrWhiteSpace(field.Value))
+        {
+            return;
+        }
+
+        await _clipboardService.SetTextAsync(field.Value);
+        StatusMessage = _localization.Format("CopiedWalletFieldFormat", field.Label);
     }
 
     [RelayCommand]
@@ -4294,6 +4657,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(NoteTabStripWidth));
         OnPropertyChanged(nameof(IsNoteInspectorPaneVisible));
         OnPropertyChanged(nameof(NoteInspectorColumnWidth));
+    }
+
+    private void RaiseOtherWorkspaceLayoutState()
+    {
+        OnPropertyChanged(nameof(IsOtherWorkspaceCompact));
+        OnPropertyChanged(nameof(TotpAccountColumnWidth));
+        OnPropertyChanged(nameof(TotpCodeColumnWidth));
+        OnPropertyChanged(nameof(TotpInspectorColumnWidth));
+        OnPropertyChanged(nameof(TotpCodeConsolePadding));
+        OnPropertyChanged(nameof(TotpCodeFontSize));
+        OnPropertyChanged(nameof(GeneratorOptionsColumnWidth));
+        OnPropertyChanged(nameof(GeneratorResultPanelPadding));
+        OnPropertyChanged(nameof(GeneratorOptionsPanelPadding));
+        OnPropertyChanged(nameof(GeneratorOptionsSpacing));
+        OnPropertyChanged(nameof(GeneratorCheckboxSpacing));
+        OnPropertyChanged(nameof(GeneratorPasswordBoxMinHeight));
+        OnPropertyChanged(nameof(GeneratorHistoryPanelMaxHeight));
+        OnPropertyChanged(nameof(ShowGeneratorStrengthSummaryCard));
     }
 
     private void RaiseNoteTreeState()
@@ -4779,13 +5160,46 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void GeneratePassword()
     {
-        GeneratedPassword = _passwordGenerator.GeneratePassword(
-            GeneratorLength,
-            GeneratorIncludeUppercase,
-            GeneratorIncludeLowercase,
-            GeneratorIncludeNumbers,
-            GeneratorIncludeSymbols);
+        GeneratedPassword = GeneratorMode switch
+        {
+            GeneratorModePassphrase => GeneratePassphrase(),
+            GeneratorModePin => GenerateFromAlphabet("0123456789", GeneratorLength),
+            GeneratorModeUsername => GenerateUsername(),
+            _ => GenerateRandomPasswordValue()
+        };
+        AddGeneratedPasswordHistory(GeneratedPassword);
         StatusMessage = _localization.Get("GeneratedPassword");
+    }
+
+    [RelayCommand]
+    private void ResetGenerator()
+    {
+        GeneratorTemplate = GeneratorTemplateBalanced;
+        ApplyGeneratorTemplate(GeneratorTemplateBalanced);
+    }
+
+    [RelayCommand]
+    private void UseGeneratedPasswordHistoryItem(GeneratorHistoryItem? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        GeneratedPassword = item.Value;
+        StatusMessage = _localization.Get("GeneratedPasswordRestoredFromHistory");
+    }
+
+    [RelayCommand]
+    private async Task CopyGeneratedPasswordHistoryItemAsync(GeneratorHistoryItem? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        await _clipboardService.SetTextAsync(item.Value);
+        StatusMessage = _localization.Get("CopiedGeneratedPassword");
     }
 
     [RelayCommand]
@@ -4798,6 +5212,227 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         await _clipboardService.SetTextAsync(GeneratedPassword);
         StatusMessage = _localization.Get("CopiedGeneratedPassword");
+    }
+
+    private string GenerateRandomPasswordValue()
+    {
+        if (!GeneratorExcludeSimilarCharacters)
+        {
+            return _passwordGenerator.GeneratePassword(
+                GeneratorLength,
+                GeneratorIncludeUppercase,
+                GeneratorIncludeLowercase,
+                GeneratorIncludeNumbers,
+                GeneratorIncludeSymbols);
+        }
+
+        var groups = BuildGeneratorCharacterGroups(
+            GeneratorIncludeUppercase,
+            GeneratorIncludeLowercase,
+            GeneratorIncludeNumbers,
+            GeneratorIncludeSymbols,
+            excludeSimilar: true);
+        return GenerateFromGroups(groups, GeneratorLength);
+    }
+
+    private string GeneratePassphrase()
+    {
+        var words = Enumerable
+            .Range(0, GeneratorWordCount)
+            .Select(_ => GeneratorPassphraseWords[RandomNumberGenerator.GetInt32(GeneratorPassphraseWords.Length)])
+            .ToList();
+
+        var result = string.Join("-", words);
+        if (GeneratorIncludeNumbers)
+        {
+            result += RandomNumberGenerator.GetInt32(10, 100).ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (GeneratorIncludeSymbols)
+        {
+            result += PickCharacter("!@#$%?");
+        }
+
+        return result;
+    }
+
+    private string GenerateUsername()
+    {
+        var words = Enumerable
+            .Range(0, 2)
+            .Select(_ => GeneratorPassphraseWords[RandomNumberGenerator.GetInt32(GeneratorPassphraseWords.Length)])
+            .ToArray();
+        var suffix = GeneratorIncludeNumbers
+            ? RandomNumberGenerator.GetInt32(100, 1000).ToString(CultureInfo.InvariantCulture)
+            : "";
+        var value = $"{words[0]}.{words[1]}{suffix}";
+
+        if (value.Length <= GeneratorLength)
+        {
+            return value;
+        }
+
+        return value[..GeneratorLength].TrimEnd('.');
+    }
+
+    private static string GenerateFromAlphabet(string alphabet, int length)
+    {
+        if (string.IsNullOrEmpty(alphabet))
+        {
+            alphabet = "abcdefghijklmnopqrstuvwxyz";
+        }
+
+        var chars = new char[Math.Max(1, length)];
+        for (var index = 0; index < chars.Length; index++)
+        {
+            chars[index] = PickCharacter(alphabet);
+        }
+
+        return new string(chars);
+    }
+
+    private static string GenerateFromGroups(IReadOnlyList<string> groups, int length)
+    {
+        if (groups.Count == 0)
+        {
+            groups = ["abcdefghijklmnopqrstuvwxyz"];
+        }
+
+        var required = groups
+            .Select(PickCharacter)
+            .ToList();
+        var alphabet = string.Concat(groups);
+        while (required.Count < length)
+        {
+            required.Add(PickCharacter(alphabet));
+        }
+
+        for (var index = required.Count - 1; index > 0; index--)
+        {
+            var swapIndex = RandomNumberGenerator.GetInt32(index + 1);
+            (required[index], required[swapIndex]) = (required[swapIndex], required[index]);
+        }
+
+        return new string(required.Take(length).ToArray());
+    }
+
+    private static char PickCharacter(string alphabet) =>
+        alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+
+    private static IReadOnlyList<string> BuildGeneratorCharacterGroups(
+        bool includeUppercase,
+        bool includeLowercase,
+        bool includeNumbers,
+        bool includeSymbols,
+        bool excludeSimilar)
+    {
+        var groups = new List<string>(4);
+        AddGeneratorGroup(groups, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", includeUppercase, excludeSimilar);
+        AddGeneratorGroup(groups, "abcdefghijklmnopqrstuvwxyz", includeLowercase, excludeSimilar);
+        AddGeneratorGroup(groups, "0123456789", includeNumbers, excludeSimilar);
+        AddGeneratorGroup(groups, "!@#$%^&*()-_=+[]{};:,.?", includeSymbols, excludeSimilar);
+        return groups;
+    }
+
+    private static void AddGeneratorGroup(List<string> groups, string alphabet, bool include, bool excludeSimilar)
+    {
+        if (!include)
+        {
+            return;
+        }
+
+        var value = excludeSimilar
+            ? new string(alphabet.Where(character => !SimilarGeneratorCharacters.Contains(character)).ToArray())
+            : alphabet;
+        if (!string.IsNullOrEmpty(value))
+        {
+            groups.Add(value);
+        }
+    }
+
+    private void AddGeneratedPasswordHistory(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var existing = GeneratedPasswordHistory.FirstOrDefault(item => item.Value == value);
+        if (existing is not null)
+        {
+            GeneratedPasswordHistory.Remove(existing);
+        }
+
+        var strength = _passwordGenerator.Analyze(value);
+        GeneratedPasswordHistory.Insert(0, new GeneratorHistoryItem(
+            value,
+            SelectedGeneratorModeLabel,
+            PasswordStrengthLocalization.Label(_localization, strength.Label),
+            DateTimeOffset.Now.ToString("HH:mm", CultureInfo.CurrentCulture)));
+
+        while (GeneratedPasswordHistory.Count > MaxGeneratorHistoryItems)
+        {
+            GeneratedPasswordHistory.RemoveAt(GeneratedPasswordHistory.Count - 1);
+        }
+
+        OnPropertyChanged(nameof(HasGeneratedPasswordHistory));
+    }
+
+    private void ApplyGeneratorTemplate(string value)
+    {
+        switch (value)
+        {
+            case GeneratorTemplateMaximum:
+                GeneratorMode = GeneratorModeRandom;
+                GeneratorLength = 32;
+                GeneratorWordCount = 4;
+                GeneratorIncludeUppercase = true;
+                GeneratorIncludeLowercase = true;
+                GeneratorIncludeNumbers = true;
+                GeneratorIncludeSymbols = true;
+                GeneratorExcludeSimilarCharacters = false;
+                break;
+            case GeneratorTemplateMemorable:
+                GeneratorMode = GeneratorModePassphrase;
+                GeneratorLength = 24;
+                GeneratorWordCount = 4;
+                GeneratorIncludeUppercase = false;
+                GeneratorIncludeLowercase = true;
+                GeneratorIncludeNumbers = true;
+                GeneratorIncludeSymbols = false;
+                GeneratorExcludeSimilarCharacters = true;
+                break;
+            case GeneratorTemplatePin:
+                GeneratorMode = GeneratorModePin;
+                GeneratorLength = 6;
+                GeneratorWordCount = 4;
+                GeneratorIncludeUppercase = false;
+                GeneratorIncludeLowercase = false;
+                GeneratorIncludeNumbers = true;
+                GeneratorIncludeSymbols = false;
+                GeneratorExcludeSimilarCharacters = false;
+                break;
+            case GeneratorTemplateUsername:
+                GeneratorMode = GeneratorModeUsername;
+                GeneratorLength = 18;
+                GeneratorWordCount = 2;
+                GeneratorIncludeUppercase = false;
+                GeneratorIncludeLowercase = true;
+                GeneratorIncludeNumbers = true;
+                GeneratorIncludeSymbols = false;
+                GeneratorExcludeSimilarCharacters = true;
+                break;
+            default:
+                GeneratorMode = GeneratorModeRandom;
+                GeneratorLength = 24;
+                GeneratorWordCount = 4;
+                GeneratorIncludeUppercase = true;
+                GeneratorIncludeLowercase = true;
+                GeneratorIncludeNumbers = true;
+                GeneratorIncludeSymbols = true;
+                GeneratorExcludeSimilarCharacters = false;
+                break;
+        }
     }
 
     [RelayCommand]
@@ -6234,6 +6869,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(PasswordCountText));
         OnPropertyChanged(nameof(ArchivedPasswordCountText));
         OnPropertyChanged(nameof(DeletedPasswordCountText));
+        OnPropertyChanged(nameof(HasDeletedPasswords));
         OnPropertyChanged(nameof(FilteredArchivedPasswords));
         OnPropertyChanged(nameof(FilteredDeletedPasswords));
         OnPropertyChanged(nameof(HasFilteredArchivedPasswords));
@@ -6241,6 +6877,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(NoteCountText));
         OnPropertyChanged(nameof(TotpCountText));
         OnPropertyChanged(nameof(HasTotpItems));
+        RaiseTotpFilterState(reconcileSelection: false);
         OnPropertyChanged(nameof(WalletCountText));
         OnPropertyChanged(nameof(HasWalletItems));
         OnPropertyChanged(nameof(TimelineCountText));
@@ -6536,6 +7173,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             VaultSources.FirstOrDefault();
 
         OnPropertyChanged(nameof(VaultSourceCountText));
+        OnPropertyChanged(nameof(HasVaultSources));
     }
 
     private bool TryCreateWebDavProfile(out WebDavProfile profile)
@@ -6712,6 +7350,56 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedTotpCount));
         OnPropertyChanged(nameof(SelectedTotpCountText));
         OnPropertyChanged(nameof(HasSelectedTotpItems));
+    }
+
+    private void RaiseTotpFilterState(bool reconcileSelection = true)
+    {
+        RefreshTotpFilterChoices();
+        OnPropertyChanged(nameof(FilteredTotpItems));
+        OnPropertyChanged(nameof(HasFilteredTotpItems));
+        OnPropertyChanged(nameof(HasTotpFilterOrSearch));
+        OnPropertyChanged(nameof(TotpExpiringSoonCount));
+        OnPropertyChanged(nameof(TotpConsoleStatusText));
+        OnPropertyChanged(nameof(TotpFilteredStatusText));
+        OnPropertyChanged(nameof(TotpEmptyStateText));
+
+        if (reconcileSelection)
+        {
+            ReconcileSelectedTotpItem();
+        }
+    }
+
+    private void RefreshTotpFilterChoices()
+    {
+        var choices = new List<TotpFilterChoice>
+        {
+            BuildTotpFilterChoice(TotpFilterAll, _localization.Get("TotpFilterAll"), TotpItems.Count),
+            BuildTotpFilterChoice(TotpFilterFavorites, _localization.Get("QuickFilterFavorite"), TotpItems.Count(item => item.IsFavorite)),
+            BuildTotpFilterChoice(TotpFilterExpiringSoon, _localization.Get("TotpFilterExpiringSoon"), TotpItems.Count(IsTotpExpiringSoon)),
+            BuildTotpFilterChoice(TotpFilterUnbound, _localization.Get("TotpFilterUnbound"), TotpItems.Count(item => item.BoundPasswordId is null))
+        };
+
+        var issuerChoices = TotpItems
+            .GroupBy(ResolveTotpIssuer, StringComparer.OrdinalIgnoreCase)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Take(8)
+            .Select(group => BuildTotpFilterChoice($"{TotpFilterIssuerPrefix}{group.Key}", group.Key, group.Count(), level: 1));
+
+        choices.AddRange(issuerChoices);
+        ReplaceItems(TotpFilterChoices, choices);
+    }
+
+    private TotpFilterChoice BuildTotpFilterChoice(string key, string label, int count, int level = 0) =>
+        new(key, label, count, level, string.Equals(SelectedTotpFilterKey, key, StringComparison.OrdinalIgnoreCase));
+
+    private void ReconcileSelectedTotpItem()
+    {
+        var visibleItems = FilteredTotpItems;
+        SelectedTotpItem =
+            visibleItems.FirstOrDefault(item => item.Id == SelectedTotpItem?.Id) ??
+            visibleItems.FirstOrDefault();
     }
 
     private void RaiseWalletSelectionState()
@@ -7846,6 +8534,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         SelectedTotpItem = nextItems.FirstOrDefault(item => item.Id == selectedId)
             ?? nextItems.FirstOrDefault();
         OnPropertyChanged(nameof(HasTotpItems));
+        RaiseTotpFilterState();
         RaiseTotpSelectionState();
     }
 
@@ -7890,6 +8579,30 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         OnPropertyChanged(nameof(TimelineCountText));
         OnPropertyChanged(nameof(HasTimelineEntries));
+    }
+
+    [RelayCommand]
+    private async Task ExportTimelineAsync()
+    {
+        if (TimelineEntries.Count == 0)
+        {
+            StatusMessage = _localization.Get("TimelineExportEmpty");
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            $"{_localization.Get("Title")}\t{_localization.Get("Description")}\t{_localization.Get("Timestamp")}\t{_localization.Get("OperationType")}\t{_localization.Get("ItemType")}"
+        };
+
+        foreach (var entry in TimelineEntries)
+        {
+            lines.Add($"{entry.Title}\t{entry.Description}\t{entry.TimestampText}\t{entry.OperationType}\t{entry.ItemType}");
+        }
+
+        ExportTimelinePreview = string.Join(Environment.NewLine, lines);
+        StatusMessage = _localization.Format("ExportedTimelineFormat", TimelineEntries.Count);
+        await Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -8320,6 +9033,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             DeviceName = Environment.MachineName
         });
         RaiseCounts();
+        RaiseTotpFilterState();
         RaiseTotpSelectionState();
         if (updateStatus)
         {
@@ -8577,6 +9291,75 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 attachment.KeepassBinaryRef ?? ""));
     }
 
+    private bool MatchesTotpFilters(SecureItem item)
+    {
+        var filterKey = string.IsNullOrWhiteSpace(SelectedTotpFilterKey) ? TotpFilterAll : SelectedTotpFilterKey;
+        if (filterKey.StartsWith(TotpFilterIssuerPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var issuer = filterKey[TotpFilterIssuerPrefix.Length..];
+            if (!string.Equals(ResolveTotpIssuer(item), issuer, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            switch (filterKey)
+            {
+                case TotpFilterFavorites when !item.IsFavorite:
+                case TotpFilterExpiringSoon when !IsTotpExpiringSoon(item):
+                case TotpFilterUnbound when item.BoundPasswordId is not null:
+                    return false;
+            }
+        }
+
+        return MatchesTotpSearch(item, SearchText);
+    }
+
+    private static bool MatchesTotpSearch(SecureItem item, string query)
+    {
+        var term = query.Trim();
+        if (term.Length == 0)
+        {
+            return true;
+        }
+
+        var data = ResolveTotpData(item);
+        return ContainsAny(
+            term,
+            item.Title,
+            item.Notes,
+            item.TotpCode,
+            data?.Issuer ?? "",
+            data?.AccountName ?? "",
+            data?.OtpType ?? "");
+    }
+
+    private bool IsTotpExpiringSoon(SecureItem item)
+    {
+        var data = ResolveTotpData(item);
+        if (data is not null)
+        {
+            return _totpService.GetRemainingSeconds(data.Period) <= 10;
+        }
+
+        return item.TotpProgress >= 66;
+    }
+
+    private static string ResolveTotpIssuer(SecureItem item)
+    {
+        var data = ResolveTotpData(item);
+        if (!string.IsNullOrWhiteSpace(data?.Issuer))
+        {
+            return data.Issuer.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(item.Title) ? "TOTP" : item.Title.Trim();
+    }
+
+    private static TotpData? ResolveTotpData(SecureItem item) =>
+        TotpDataResolver.ParseStoredItemData(item.ItemData, item.Title, item.Notes);
+
     private static bool IsLocalOnlyPassword(PasswordEntry item)
     {
         return item.BitwardenVaultId is null &&
@@ -8801,17 +9584,51 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void QueueSaveSettings()
     {
-        _ = SaveSettingsAsync();
+        var shouldStartSave = false;
+        lock (_settingsSaveSync)
+        {
+            _hasPendingSettingsSave = true;
+            if (!_isSavingSettings)
+            {
+                _isSavingSettings = true;
+                shouldStartSave = true;
+            }
+        }
+
+        if (shouldStartSave)
+        {
+            _ = SaveSettingsAsync();
+        }
     }
 
     private async Task SaveSettingsAsync()
     {
         try
         {
-            await _settingsService.SaveAsync();
+            while (true)
+            {
+                lock (_settingsSaveSync)
+                {
+                    if (!_hasPendingSettingsSave)
+                    {
+                        _isSavingSettings = false;
+                        return;
+                    }
+
+                    _hasPendingSettingsSave = false;
+                }
+
+                await _settingsService.SaveAsync();
+            }
         }
         catch (Exception ex)
         {
+            lock (_settingsSaveSync)
+            {
+                _isSavingSettings = false;
+                _hasPendingSettingsSave = false;
+            }
+
             StatusMessage = _localization.Format("VaultMetadataLoadFailedFormat", ex.Message);
         }
     }
@@ -8842,6 +9659,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
         RaisePasswordFilterState();
         OnPropertyChanged(nameof(ClearPasswordFiltersText));
         RaisePasswordSortText();
+        OnPropertyChanged(nameof(TotpScanQrText));
+        OnPropertyChanged(nameof(TotpManualAddText));
+        OnPropertyChanged(nameof(TotpMoreActionsText));
+        OnPropertyChanged(nameof(TotpFilterTitleText));
+        OnPropertyChanged(nameof(TotpIssuerGroupsText));
+        OnPropertyChanged(nameof(TotpNoFilteredResultsText));
+        OnPropertyChanged(nameof(TotpEmptyStateText));
+        OnPropertyChanged(nameof(ClearTotpFiltersText));
+        OnPropertyChanged(nameof(TotpShowHiddenText));
+        OnPropertyChanged(nameof(TotpHelpText));
+        RaiseTotpFilterState(reconcileSelection: false);
         RaiseCounts();
         OnPropertyChanged(nameof(SecurityIssueCountText));
         OnPropertyChanged(nameof(NotePreviewMarkdown));
@@ -8868,7 +9696,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ReplaceOptions(ThemeOptions,
             new("system", _localization.Get("SystemDefault")),
             new("light", _localization.Get("Light")),
-            new("dark", _localization.Get("Dark")));
+            new("dark", _localization.Get("Dark")),
+            new("high-contrast", _localization.Get("HighContrast")));
 
         ReplaceOptions(StartupSectionOptions,
             new("Passwords", _localization.Passwords),
@@ -8911,12 +9740,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
             new("created-desc", _localization.Get("SortCreated")),
             new("favorites-first", _localization.Get("SortFavorites")));
 
+        ReplaceOptions(GeneratorModeOptions,
+            new(GeneratorModeRandom, _localization.Get("GeneratorModeRandom")),
+            new(GeneratorModePassphrase, _localization.Get("GeneratorModePassphrase")),
+            new(GeneratorModePin, _localization.Get("GeneratorModePin")),
+            new(GeneratorModeUsername, _localization.Get("GeneratorModeUsername")));
+
+        ReplaceOptions(GeneratorTemplateOptions,
+            new(GeneratorTemplateBalanced, _localization.Get("GeneratorTemplateBalanced")),
+            new(GeneratorTemplateMaximum, _localization.Get("GeneratorTemplateMaximum")),
+            new(GeneratorTemplateMemorable, _localization.Get("GeneratorTemplateMemorable")),
+            new(GeneratorTemplatePin, _localization.Get("GeneratorTemplatePin")),
+            new(GeneratorTemplateUsername, _localization.Get("GeneratorTemplateUsername")));
+
         ReplaceOptions(
             SecurityQuestionOptions,
             _securityQuestionService.PredefinedQuestions
                 .Select(question => new SettingsChoice(question.Id, question.Text))
                 .ToArray());
 
+        RaiseGeneratorState();
         RaiseFilteredPasswordsChanged();
     }
 
@@ -8927,6 +9770,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             target.Add(choice);
         }
+    }
+
+    private static string FindChoiceLabel(IEnumerable<SettingsChoice> choices, object value)
+    {
+        var choice = choices.FirstOrDefault(item => Equals(item.Value, value));
+        return choice?.Label ?? Convert.ToString(value, CultureInfo.CurrentCulture) ?? "";
     }
 
     private void RaisePasswordSortText()
@@ -9172,10 +10021,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var themeVariant = theme switch
+        var normalizedTheme = NormalizeThemeValue(theme);
+        var themeVariant = normalizedTheme switch
         {
             "light" => ThemeVariant.Light,
             "dark" => ThemeVariant.Dark,
+            "high-contrast" => FluentAvaloniaTheme.HighContrastTheme,
             _ => ThemeVariant.Default
         };
         Application.Current.RequestedThemeVariant = themeVariant;
@@ -9185,13 +10036,56 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         var useDarkTheme = themeVariant == ThemeVariant.Dark ||
+            themeVariant == FluentAvaloniaTheme.HighContrastTheme ||
             themeVariant == ThemeVariant.Default && Application.Current.ActualThemeVariant == ThemeVariant.Dark;
-        ApplyMonicaThemeResources(Application.Current.Resources, useDarkTheme);
+        ApplyMonicaThemeResources(Application.Current.Resources, useDarkTheme, normalizedTheme == "high-contrast");
     }
 
-    private static void ApplyMonicaThemeResources(IResourceDictionary resources, bool useDarkTheme)
+    private static string NormalizeThemeValue(string theme) =>
+        theme.Trim().ToLowerInvariant() switch
+        {
+            "highcontrast" or "high-contrast" or "contrast" => "high-contrast",
+            "light" => "light",
+            "dark" => "dark",
+            _ => "system"
+        };
+
+    private static void ApplyMonicaThemeResources(
+        IResourceDictionary resources,
+        bool useDarkTheme,
+        bool useHighContrastTheme)
     {
-        var colors = useDarkTheme
+        var colors = useHighContrastTheme
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["LayerFillColorDefaultBrush"] = "#FFFFFF",
+                ["LayerFillColorAltBrush"] = "#000000",
+                ["LayerFillColorSubtleBrush"] = "#F2F2F2",
+                ["CardBackgroundBrush"] = "#FFFFFF",
+                ["CardBorderBrush"] = "#000000",
+                ["CardBackgroundFillColorDefaultBrush"] = "#FFFFFF",
+                ["CardBackgroundFillColorSecondaryBrush"] = "#F2F2F2",
+                ["CardStrokeColorDefaultBrush"] = "#000000",
+                ["DividerStrokeColorDefaultBrush"] = "#000000",
+                ["ControlFillColorDefaultBrush"] = "#FFFFFF",
+                ["ControlFillColorSecondaryBrush"] = "#F2F2F2",
+                ["ControlFillColorTertiaryBrush"] = "#E0E0E0",
+                ["ListViewItemBackgroundPointerOver"] = "#E6F7FF",
+                ["ListViewItemBackgroundSelected"] = "#FFF200",
+                ["ListViewItemBackgroundSelectedPointerOver"] = "#FFE000",
+                ["TextFillColorPrimaryBrush"] = "#000000",
+                ["TextFillColorSecondaryBrush"] = "#000000",
+                ["TextFillColorTertiaryBrush"] = "#1A1A1A",
+                ["AccentFillColorDefaultBrush"] = "#FFFF00",
+                ["AccentFillColorSecondaryBrush"] = "#00FFFF",
+                ["AccentFillColorTertiaryBrush"] = "#E6F7FF",
+                ["AccentTextFillColorPrimaryBrush"] = "#000000",
+                ["SystemFillColorCautionBrush"] = "#FFFF00",
+                ["SystemFillColorCriticalBrush"] = "#B00000",
+                ["MutedTextBrush"] = "#CC000000",
+                ["OverlayFillColorDefaultBrush"] = "#CC000000"
+            }
+            : useDarkTheme
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["LayerFillColorDefaultBrush"] = "#202020",
